@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "unitree-sdk2py"
 version = "0.1"
-requires-python = "== 3.9.19"
+requires-python = "~= 3.10"
 dynamic = [
     "description",
     "readme",
@@ -15,4 +15,15 @@ dynamic = [
     # "dependencies",
     "urls",
 ]
-dependencies = ["cyclonedds==0.10.2", "numpy", "opencv-python", "pygame", "ultralytics", "torch", "pandas", "tqdm", "seaborn"]
+dependencies = [
+    "cyclonedds==0.10.2", # as said in docs. Should also work with 0.10.5
+    "numpy",
+    "opencv-python",
+    "pygame",
+    "ultralytics",
+    "torch==2.9.0",
+    "pandas",
+    "tqdm",
+    "seaborn",
+    # "go2_webrtc_driver",
+]
