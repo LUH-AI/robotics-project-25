@@ -15,4 +15,4 @@ dynamic = [
     # "dependencies",
     "urls",
 ]
-dependencies = ["cyclonedds==0.10.2", "numpy", "opencv-python", "pygame"]
+dependencies = ["cyclonedds==0.10.2", "numpy", "opencv-python", "pygame", "ultralytics", "torch", "pandas", "tqdm", "seaborn"]
