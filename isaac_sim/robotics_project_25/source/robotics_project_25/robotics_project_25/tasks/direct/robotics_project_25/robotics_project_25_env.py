@@ -24,7 +24,6 @@ class RoboticsProject25Env(DirectRLEnv):
 
         # Walls (static asset)
         # TODO: Please change with your own path
-   
         walls_usd_path = (
             "C:\\Users\\johnn\\Desktop\\IsaacLab\\robotics-project-25\\isaac_sim\\"
             "robotics_project_25\\source\\robotics_project_25\\robotics_project_25\\"
@@ -37,7 +36,9 @@ class RoboticsProject25Env(DirectRLEnv):
             mass_props=sim_utils.MassPropertiesCfg(mass=0.0),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(),
         )
-        walls_cfg.func("/World/walls", walls_cfg)
+
+        template_env = self.scene.env_prim_paths[0] # Generate num_env roomes
+        walls_cfg.func(template_env + "/walls", walls_cfg)
 
         # spawn Unytree Go2 robot
         self.robot = Articulation(self.cfg.robot_cfg)
@@ -51,7 +52,7 @@ class RoboticsProject25Env(DirectRLEnv):
         light_cfg.func("/World/Light", light_cfg)
 
         # Clone environments (even if num_envs=1)
-        self.scene.clone_environments(copy_from_source=False)
+        self.scene.clone_environments(copy_from_source=True)
 
     
     def _pre_physics_step(self, actions: torch.Tensor):
@@ -79,3 +80,26 @@ class RoboticsProject25Env(DirectRLEnv):
 
     def _reset_idx(self, env_ids):
         super()._reset_idx(env_ids)
+
+        device = self.device
+
+        env_base = self.scene.env_origins[env_ids]
+
+        # random XY inside a room 
+        room_half = 2.0
+
+        rand_xy = (torch.rand(len(env_ids), 2, device=device) * 2 - 1) * room_half
+        z = torch.full((len(env_ids), 1), 0.40, device=device)
+
+        local_pos = torch.cat([rand_xy, z], dim=-1)
+
+        world_pos = env_base + local_pos
+
+        quat = self.robot.data.root_quat_w[env_ids]
+
+
+        pose = torch.cat([world_pos, quat], dim=-1)
+
+        self.robot.write_root_pose_to_sim(pose, env_ids)
+
+

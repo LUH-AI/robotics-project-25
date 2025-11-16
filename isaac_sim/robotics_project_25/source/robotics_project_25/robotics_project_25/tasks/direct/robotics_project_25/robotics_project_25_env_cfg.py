@@ -51,7 +51,8 @@ class RoboticsProject25EnvCfg(DirectRLEnvCfg):
 
     # Scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
+        # TODO: Make them as parameters (no hardcoding)
         num_envs=1,
-        env_spacing=4.0,
+        env_spacing=10.0, # TODO> Make env_spacing larger if walls are big, make env_spacing bigger as we increase num_envs
         replicate_physics=True,
     )
