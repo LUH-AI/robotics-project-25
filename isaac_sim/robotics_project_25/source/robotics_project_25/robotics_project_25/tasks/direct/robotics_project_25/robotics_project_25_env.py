@@ -23,9 +23,12 @@ class RoboticsProject25Env(DirectRLEnv):
         spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
 
         # Walls (static asset)
+        # TODO: Please change with your own path
+   
         walls_usd_path = (
-            "C:/Users/johnn/Desktop/IsaacLab/robotics-project-25/source/"
-            "robotics_project_25/robotics_project_25/tasks/direct/robotics_project_25/assets/walls.usd"
+            "C:\\Users\\johnn\\Desktop\\IsaacLab\\robotics-project-25\\isaac_sim\\"
+            "robotics_project_25\\source\\robotics_project_25\\robotics_project_25\\"
+            "tasks\\direct\\robotics_project_25\\assets\\walls.usd"
         )
 
         walls_cfg = sim_utils.UsdFileCfg(
@@ -36,33 +39,37 @@ class RoboticsProject25Env(DirectRLEnv):
         )
         walls_cfg.func("/World/walls", walls_cfg)
 
-        # Robot
+        # spawn Unytree Go2 robot
         self.robot = Articulation(self.cfg.robot_cfg)
         self.scene.articulations["robot"] = self.robot
 
         # Lighting
-        light_cfg = sim_utils.DomeLightCfg(intensity=4000.0, color=(0.9, 0.9, 0.9))
+        light_cfg = sim_utils.DomeLightCfg(
+            intensity=4000.0, 
+            color=(0.9, 0.9, 0.9)
+        )
         light_cfg.func("/World/Light", light_cfg)
 
         # Clone environments (even if num_envs=1)
         self.scene.clone_environments(copy_from_source=False)
 
+    
     def _pre_physics_step(self, actions: torch.Tensor):
         self.actions = actions.clone()
         self._apply_action()
 
     def _apply_action(self):
-        # Zero torque placeholder — change when adding control
         self.robot.set_joint_effort_target(
             torch.zeros_like(self.robot.data.joint_pos)
         )
 
     def _get_observations(self):
-        # Simple placeholder observation
+        # observation
         obs = self.robot.data.root_pos_w.clone()
         return {"policy": obs}
 
     def _get_rewards(self):
+        # No reward
         return torch.zeros(self.num_envs, device=self.device)
 
     def _get_dones(self):
