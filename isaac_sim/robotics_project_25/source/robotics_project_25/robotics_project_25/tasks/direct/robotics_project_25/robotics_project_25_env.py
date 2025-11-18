@@ -9,8 +9,9 @@ from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 
+from isaaclab.sim import CuboidCfg, CylinderCfg
 from .robotics_project_25_env_cfg import RoboticsProject25EnvCfg
-
+import random
 
 class RoboticsProject25Env(DirectRLEnv):
     cfg: RoboticsProject25EnvCfg
@@ -20,39 +21,76 @@ class RoboticsProject25Env(DirectRLEnv):
 
     def _setup_scene(self):
         # Ground
-        spawn_ground_plane(prim_path="/World/ground", cfg=GroundPlaneCfg())
+        spawn_ground_plane("/World/ground", cfg=GroundPlaneCfg())
 
-        # Walls (static asset)
-        # TODO: Please change with your own path
-        walls_usd_path = (
-            "C:\\Users\\johnn\\Desktop\\IsaacLab\\robotics-project-25\\isaac_sim\\"
-            "robotics_project_25\\source\\robotics_project_25\\robotics_project_25\\"
-            "tasks\\direct\\robotics_project_25\\assets\\walls.usd"
-        )
-
+        # Walls (room)
         walls_cfg = sim_utils.UsdFileCfg(
-            usd_path=walls_usd_path,
+            usd_path=self.cfg.walls_asset,
             visible=True,
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.0),
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.0),  # static
+            rigid_props=sim_utils.RigidBodyPropertiesCfg()
         )
+        
+        # Red sphere obstacle
+        cfg_sphere = sim_utils.SphereCfg(
+            radius=0.5,
+            visible=True,
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(1.0, 0.0, 0.0),
+            ),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            mass_props=sim_utils.MassPropertiesCfg(mass=1.0),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+        )
+        cfg_sphere.func("/World/sphere", cfg_sphere, translation=(1.0, -3.0, 0.7))
 
-        template_env = self.scene.env_prim_paths[0] # Generate num_env roomes
-        walls_cfg.func(template_env + "/walls", walls_cfg)
+        env0 = self.scene.env_prim_paths[0]
+        walls_cfg.func(env0 + "/walls", walls_cfg)
 
-        # spawn Unytree Go2 robot
+        # Obstacles (table)
+        self._spawn_obstacles(env0)
+
+        # Robot
         self.robot = Articulation(self.cfg.robot_cfg)
         self.scene.articulations["robot"] = self.robot
 
-        # Lighting
-        light_cfg = sim_utils.DomeLightCfg(
-            intensity=4000.0, 
+        # Light
+        light = sim_utils.DomeLightCfg(
+            intensity=4000, 
             color=(0.9, 0.9, 0.9)
         )
-        light_cfg.func("/World/Light", light_cfg)
+        light.func("/World/Light", light)
 
-        # Clone environments (even if num_envs=1)
+        # clone Envs
         self.scene.clone_environments(copy_from_source=True)
+
+
+
+    def _spawn_obstacles(self, env_path):
+        robot_pos = self.cfg.robot_cfg.init_state.pos[:2]  
+        min_dist = 1.0  
+
+        while True:
+            tx = random.uniform(-4.0, +4.0)
+            ty = random.uniform(-4.0, +4.0)
+            dx = tx - robot_pos[0]
+            dy = ty - robot_pos[1]
+            if dx*dx + dy*dy >= min_dist*min_dist:
+                break
+
+        table_cfg = sim_utils.UsdFileCfg(
+            usd_path=self.cfg.table_asset,
+            visible=True,
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.0),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg()
+        )
+        table_cfg.func(
+            f"{env_path}/table",
+            table_cfg,
+            translation=(tx, ty, 0.0),
+            orientation=(0.0, 0.0, 0.0, 1.0)
+        )
+
 
     
     def _pre_physics_step(self, actions: torch.Tensor):
@@ -80,7 +118,7 @@ class RoboticsProject25Env(DirectRLEnv):
 
     def _reset_idx(self, env_ids):
         super()._reset_idx(env_ids)
-
+        '''
         device = self.device
 
         env_base = self.scene.env_origins[env_ids]
@@ -102,4 +140,4 @@ class RoboticsProject25Env(DirectRLEnv):
 
         self.robot.write_root_pose_to_sim(pose, env_ids)
 
-
+        '''
