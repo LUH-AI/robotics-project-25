@@ -227,8 +227,8 @@ __marimo__/
 **/.thumbs
 
 # No USD files allowed in the repo
-**/*.usd
-**/*.usda
+# **/*.usd
+# **/*.usda
 **/*.usdc
 **/*.usdz
 
