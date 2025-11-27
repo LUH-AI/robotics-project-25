@@ -57,13 +57,15 @@ class RoboticsProject25EnvCfg(DirectRLEnvCfg):
         replicate_physics=True,
     )
     
-    walls_asset = (
+    '''walls_asset = (
             "C:\\Users\\johnn\\Desktop\\IsaacLab\\robotics-project-25\\isaac_sim\\"
             "robotics_project_25\\source\\robotics_project_25\\robotics_project_25\\"
             "tasks\\direct\\robotics_project_25\\assets\\walls.usd"
-        )
-    table_asset = (
+        )'''
+    walls_asset = '/home/rlproject25/robo_project/robotics-project-25/isaac_sim/robotics_project_25/source/robotics_project_25/robotics_project_25/tasks/direct/robotics_project_25/assets/walls.usd'
+    '''table_asset = (
             "C:\\Users\\johnn\\Desktop\\IsaacLab\\robotics-project-25\\isaac_sim\\"
             "robotics_project_25\\source\\robotics_project_25\\robotics_project_25\\"
             "tasks\\direct\\robotics_project_25\\assets\\table.usd"
-        )
+        )'''
+    table_asset = '/home/rlproject25/robo_project/robotics-project-25/isaac_sim/robotics_project_25/source/robotics_project_25/robotics_project_25/tasks/direct/robotics_project_25/assets/table.usd'

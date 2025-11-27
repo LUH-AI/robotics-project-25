@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG
+
 import torch
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
@@ -51,7 +53,8 @@ class RoboticsProject25Env(DirectRLEnv):
         self._spawn_obstacles(env0)
 
         # Robot
-        self.robot = Articulation(self.cfg.robot_cfg)
+        # self.robot = Articulation(self.cfg.robot_cfg)
+        self.robot = UNITREE_GO2_CFG.replace(prim_path="World/Go2")
         self.scene.articulations["robot"] = self.robot
 
         # Light
