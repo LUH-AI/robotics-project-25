@@ -1,5 +1,5 @@
 from isaacsim import SimulationApp
-simulation_app = SimulationApp({"headless": False})
+simulation_app = SimulationApp({"headless": True})
 
 import math
 import numpy as np
@@ -7,14 +7,24 @@ import numpy as np
 from omni.isaac.core import World
 from omni.isaac.core.robots import Robot
 from omni.isaac.core.utils.nucleus import get_assets_root_path
-from omni.isaac.core.utils.stage import add_reference_to_stage
+from omni.isaac.core.utils.stage import add_reference_to_stage, open_stage
 from omni.isaac.core.utils.types import ArticulationAction
 
 
 def main():
+    #############################
+    #### Load & Create World ####
+    #############################
+    # Load predefined World (in USD format) as the stage
+    world_path = "/home/rlproject25/Desktop/usda_files/World-base.usd"
+    open_stage(world_path)
+    # Create the world from the currently loaded stage 
     world = World(stage_units_in_meters=1.0)
-    world.scene.add_default_ground_plane()
+    # world.scene.add_default_ground_plane() # GRound plane already in the loaded stage
 
+    ############################
+    #### Load the Go2 Robot ####
+    ############################
     assets_root = get_assets_root_path()
     if assets_root is None:
         raise RuntimeError("Could not find Isaac assets root.")
@@ -25,8 +35,13 @@ def main():
     go2 = Robot(prim_path="/World/Go2", name="go2")
     world.scene.add(go2)
 
+    # Reset needed to actually create everything in the world & "start" it 
     world.reset()
 
+
+    ############################
+    #### Init Go2 Controlls ####
+    ############################
     controller = go2.get_articulation_controller()
     dof_names = go2.dof_names
     num_dof = go2.num_dof
