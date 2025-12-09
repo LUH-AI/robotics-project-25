@@ -6,13 +6,9 @@ CONFIG = {"renderer": "RayTracedLighting", "headless": False}
 # Example ROS 2 bridge sample demonstrating the manual loading of stages and manual publishing of images
 simulation_app = SimulationApp(CONFIG)
 
-import omni, math
+import math
 import numpy as np
-from isaacsim.core.api import SimulationContext
-from isaacsim.core.utils import stage, extensions, nucleus
-import omni.graph.core as og
-import omni.replicator.core as rep
-import omni.syntheticdata._syntheticdata as sd
+from isaacsim.core.utils import extensions, nucleus
 
 from omni.isaac.core.utils.stage import add_reference_to_stage, open_stage
 from omni.isaac.core import World
@@ -23,13 +19,15 @@ from omni.isaac.core.utils.nucleus import get_assets_root_path
 from omni.isaac.core.utils.types import ArticulationAction
 
 
-from isaacsim.core.utils.prims import set_targets
 from isaacsim.sensors.camera import Camera
 import isaacsim.core.utils.numpy.rotations as rot_utils
-from isaacsim.core.utils.prims import is_prim_path_valid
-from isaacsim.core.nodes.scripts.utils import set_target_prims
 
-from ros_publishers.publishers import publish_camera_info, publish_rgb, publish_depth, publish_camera_tf, publish_pointcloud_from_depth
+# Import our ROS publishing functions
+from ros_publishers.publish_pointcloud_from_depth import publish_pointcloud_from_depth
+from ros_publishers.publish_camera_info import publish_camera_info
+from ros_publishers.publish_rgb import publish_rgb
+from ros_publishers.publish_camera_tf import publish_camera_tf
+from ros_publishers.publish_depth import publish_depth
 
 # Enable ROS 2 bridge extension
 extensions.enable_extension("isaacsim.ros2.bridge")
@@ -38,11 +36,12 @@ simulation_app.update()
 
 world_path = "/home/rlproject25/Desktop/usda_files/World-base.usd"
 open_stage(world_path)
-#world = SimulationContext(stage_units_in_meters=1.0)
-# Create the world from the currently loaded stage 
+# world = SimulationContext(stage_units_in_meters=1.0)
+# Create the world from the currently loaded stage
 world = World(stage_units_in_meters=1.0)
 
-def main(): 
+
+def main():
     # Locate Isaac Sim assets folder to load environment and robot stages
     assets_root_path = nucleus.get_assets_root_path()
     if assets_root_path is None:
@@ -62,7 +61,7 @@ def main():
 
     # Create a Camera prim. The Camera class takes the position and orientation in the world axes convention.
     camera = Camera(
-        prim_path="/World/Go2/base/floating_camera",
+        prim_path="/World/Go2/base/base_frame",
         position=np.array([-3.11, -1.87, 1.0]),
         frequency=20,
         resolution=(256, 256),
@@ -73,15 +72,12 @@ def main():
     simulation_app.update()
     camera.initialize()
 
-    # Reset needed to actually create everything in the world & "start" it 
+    # Reset needed to actually create everything in the world & "start" it
     world.reset()
-
-
 
     controller = go2.get_articulation_controller()
     dof_names = go2.dof_names
-    num_dof = go2.num_dof
-
+    # num_dof = go2.num_dof
 
     q_stand = np.array(go2.get_joint_positions(), dtype=np.float32)
 
@@ -89,7 +85,6 @@ def main():
     def set_if_exists(name, value):
         if name in dof_names:
             q_stand[dof_names.index(name)] = value
-
 
     set_if_exists("FL_hip_joint", 0.1)
     set_if_exists("RL_hip_joint", 0.1)
@@ -114,7 +109,7 @@ def main():
     dt = world.get_physics_dt()
     t = 0.0
 
-    stand_steps = int(2.0 / dt) 
+    stand_steps = int(2.0 / dt)
     for _ in range(stand_steps):
         action = ArticulationAction(joint_positions=q_stand)
         controller.apply_action(action)
@@ -136,26 +131,33 @@ def main():
     def j(name):
         return idx[name]
 
-
-
-
-
-    ############### Calling Camera publishing functions ###############
-
-    # Call the publishers.
-
+    # --------------------------------------------------------------------------------- #
+    # --------------------------------------------------------------------------------- #
+    # ---------------------- Calling Camera publishing functions ---------------------- #
+    # --------------------------------------------------------------------------------- #
+    # --------------------------------------------------------------------------------- #
     approx_freq = 30
     publish_camera_tf(camera)
-    publish_camera_info(camera, approx_freq)
-    publish_rgb(camera, approx_freq)
+    publish_camera_info(camera, approx_freq, "/visual_slam/camera_info_0")
+    publish_camera_info(camera, approx_freq, "/visual_slam/camera_info_1")
+    publish_rgb(camera, approx_freq, "/visual_slam/image_0")
+    publish_rgb(camera, approx_freq, "/visual_slam/image_1")
     publish_depth(camera, approx_freq)
     publish_pointcloud_from_depth(camera, approx_freq)
 
-    ####################################################################
-
-    # Initialize physics
+    # ---------------------------------------------------------------- #
+    # ---------------------------------------------------------------- #
+    # ---------------------- Initialize Physics ---------------------- #
+    # ---------------------------------------------------------------- #
+    # ---------------------------------------------------------------- #
     world.initialize_physics()
     world.play()
+
+    # ------------------------------------------------------------ #
+    # ------------------------------------------------------------ #
+    # ---------------------- Run Simulation ---------------------- #
+    # ------------------------------------------------------------ #
+    # ------------------------------------------------------------ #
 
     while simulation_app.is_running():
         t += dt
@@ -179,7 +181,6 @@ def main():
 
         q_cmd[j("RR_hip_joint")] += RR_hip
         q_cmd[j("RR_thigh_joint")] += RR_thigh
-
 
         controller.apply_action(ArticulationAction(joint_positions=q_cmd))
 
