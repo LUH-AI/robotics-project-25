@@ -1,6 +1,10 @@
 # Robotics Project 25
 
 
+## Build Repo (Only on clean install!)
+Execute `./build_repo.bash`
+
+
 Student Robotics Project Winter 2025
 Your idea goes here!
 
