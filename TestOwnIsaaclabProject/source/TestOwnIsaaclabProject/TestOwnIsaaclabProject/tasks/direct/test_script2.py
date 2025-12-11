@@ -32,6 +32,12 @@ from ros_publishers.publish_depth import publish_depth
 # Enable ROS 2 bridge extension
 extensions.enable_extension("isaacsim.ros2.bridge")
 
+import rclpy
+from rclpy.node import Node
+from nav_msgs.msg import Odometry
+
+
+
 simulation_app.update()
 
 world_path = "/home/rlproject25/Desktop/usda_files/World-base.usd"
@@ -137,12 +143,10 @@ def main():
     # --------------------------------------------------------------------------------- #
     # --------------------------------------------------------------------------------- #
     approx_freq = 30
-    publish_camera_tf(camera)
-    publish_camera_info(camera, approx_freq, "/visual_slam/camera_info_0")
-    publish_camera_info(camera, approx_freq, "/visual_slam/camera_info_1")
-    publish_rgb(camera, approx_freq, "/visual_slam/image_0")
-    publish_rgb(camera, approx_freq, "/visual_slam/image_1")
-    publish_depth(camera, approx_freq)
+    # publish_camera_tf(camera)
+    # publish_camera_info(camera, approx_freq, "/visual_slam/camera_info_0")
+    # publish_rgb(camera, approx_freq, "/visual_slam/image_0")
+    # publish_depth(camera, approx_freq)
     publish_pointcloud_from_depth(camera, approx_freq)
 
     # ---------------------------------------------------------------- #
