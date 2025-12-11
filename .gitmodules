@@ -1,0 +1,6 @@
+[submodule "deps/unitree_go2_nav/src/unitree_go2_nav"]
+	path = deps/unitree_go2_nav/src/unitree_go2_nav
+	url = https://github.com/Sayantani-Bhattacharya/unitree_go2_nav.git
+[submodule "deps/rclpy/IsaacSim-ros_workspaces"]
+	path = deps/rclpy/IsaacSim-ros_workspaces
+	url = https://github.com/isaac-sim/IsaacSim-ros_workspaces.git
