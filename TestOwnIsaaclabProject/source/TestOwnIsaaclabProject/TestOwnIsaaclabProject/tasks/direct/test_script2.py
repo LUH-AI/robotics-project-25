@@ -1,14 +1,15 @@
 from isaacsim import SimulationApp
 import sys
 
-CONFIG = {"renderer": "RayTracedLighting", "headless": False}
+CONFIG = {"renderer": "RayTracedLighting", "headless": True}
 
 # Example ROS 2 bridge sample demonstrating the manual loading of stages and manual publishing of images
 simulation_app = SimulationApp(CONFIG)
 
-import math
+import math, time
 import numpy as np
 from isaacsim.core.utils import extensions, nucleus
+
 
 from omni.isaac.core.utils.stage import add_reference_to_stage, open_stage
 from omni.isaac.core import World
@@ -18,12 +19,18 @@ from omni.isaac.core.utils.nucleus import get_assets_root_path
 
 from omni.isaac.core.utils.types import ArticulationAction
 
+from pxr import Gf
+import omni.replicator.core as rep
 
 from isaacsim.sensors.camera import Camera
+from isaacsim.sensors.rtx import LidarRtx
+
 import isaacsim.core.utils.numpy.rotations as rot_utils
 
 # Import our ROS publishing functions
 from ros_publishers.publish_pointcloud_from_depth import publish_pointcloud_from_depth
+
+from ros_publishers.odom_publisher import OdometryPublisher
 from ros_publishers.publish_camera_info import publish_camera_info
 from ros_publishers.publish_rgb import publish_rgb
 from ros_publishers.publish_camera_tf import publish_camera_tf
@@ -33,10 +40,8 @@ from ros_publishers.publish_depth import publish_depth
 extensions.enable_extension("isaacsim.ros2.bridge")
 
 import rclpy
-from rclpy.node import Node
-from nav_msgs.msg import Odometry
 
-
+rclpy.init()
 
 simulation_app.update()
 
@@ -77,6 +82,22 @@ def main():
     camera.initialize()
     simulation_app.update()
     camera.initialize()
+
+    # Create Lidar
+    lidar_attributes = {"omni:sensor:Core:scanRateBaseHz": 20}
+    lidar = LidarRtx(
+        prim_path="/World/Go2/lidar",
+        translation=np.array([0.0, 0.0, 1.0]),
+        orientation=np.array([1.0, 0.0, 0.0, 0.0]),
+        config_file_name="Example_Rotary",
+        **lidar_attributes,
+    )
+
+    print(lidar)
+    lidar.initialize()
+    simulation_app.update()
+
+    lidar.attach_annotator("IsaacExtractRTXSensorPointCloudNoAccumulator")
 
     # Reset needed to actually create everything in the world & "start" it
     world.reset()
@@ -148,6 +169,7 @@ def main():
     # publish_rgb(camera, approx_freq, "/visual_slam/image_0")
     # publish_depth(camera, approx_freq)
     publish_pointcloud_from_depth(camera, approx_freq)
+    odom_publisher = OdometryPublisher()
 
     # ---------------------------------------------------------------- #
     # ---------------------------------------------------------------- #
@@ -164,6 +186,28 @@ def main():
     # ------------------------------------------------------------ #
 
     while simulation_app.is_running():
+
+        data = lidar.get_current_frame()
+        print("Lidar point cloud data shape: ", data)
+
+        pos, rot = go2.get_world_pose()
+        # print("Robot position: ", pos, " orientation: ", rot)
+
+        # odom_publisher.publish_odometry(
+        #     pos[0], pos[1], pos[2], rot[0], rot[1], rot[2], rot[3]
+        # )
+        odom_publisher.publish_odometry(
+            float(pos[0]),
+            float(pos[1]),
+            float(pos[2]),
+            float(rot[0]),
+            float(rot[1]),
+            float(rot[2]),
+            float(rot[3]),
+        )
+
+        rclpy.spin_once(odom_publisher, timeout_sec=0)
+
         t += dt
         base_phase = 2.0 * math.pi * step_freq * t
 
@@ -190,6 +234,7 @@ def main():
 
         world.step(render=True)
 
+    rclpy.shutdown()
     world.stop()
     simulation_app.close()
 
