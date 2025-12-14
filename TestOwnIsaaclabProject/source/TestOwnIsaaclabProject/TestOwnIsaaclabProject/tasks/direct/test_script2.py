@@ -29,6 +29,7 @@ import isaacsim.core.utils.numpy.rotations as rot_utils
 
 # Import our ROS publishing functions
 from ros_publishers.publish_pointcloud_from_depth import publish_pointcloud_from_depth
+from ros_publishers.lidar_publisher import PointCloudPublisher
 
 from ros_publishers.odom_publisher import OdometryPublisher
 from ros_publishers.publish_camera_info import publish_camera_info
@@ -164,12 +165,13 @@ def main():
     # --------------------------------------------------------------------------------- #
     # --------------------------------------------------------------------------------- #
     approx_freq = 30
-    # publish_camera_tf(camera)
-    # publish_camera_info(camera, approx_freq, "/visual_slam/camera_info_0")
-    # publish_rgb(camera, approx_freq, "/visual_slam/image_0")
-    # publish_depth(camera, approx_freq)
-    publish_pointcloud_from_depth(camera, approx_freq)
+    publish_camera_tf(camera)
+    publish_camera_info(camera, approx_freq, "/visual_slam/camera_info_0")
+    publish_rgb(camera, approx_freq, "/visual_slam/image_0")
+    publish_depth(camera, approx_freq)
+    # publish_pointcloud_from_depth(camera, approx_freq)
     odom_publisher = OdometryPublisher()
+    lidar_publisher = PointCloudPublisher()
 
     # ---------------------------------------------------------------- #
     # ---------------------------------------------------------------- #
@@ -187,9 +189,6 @@ def main():
 
     while simulation_app.is_running():
 
-        data = lidar.get_current_frame()
-        print("Lidar point cloud data shape: ", data)
-
         pos, rot = go2.get_world_pose()
         # print("Robot position: ", pos, " orientation: ", rot)
 
@@ -206,7 +205,12 @@ def main():
             float(rot[3]),
         )
 
+        data = lidar.get_current_frame()
+        print("Lidar point cloud data shape: ", data)
+        lidar_publisher.publish(data)
+
         rclpy.spin_once(odom_publisher, timeout_sec=0)
+        rclpy.spin_once(lidar_publisher, timeout_sec=0)
 
         t += dt
         base_phase = 2.0 * math.pi * step_freq * t
