@@ -1,135 +1,114 @@
-# Go2 Navigation Stack on Isaac Sim 5.1 + ROS 2 Humble
+# Go2 Navigation Stack (Isaac Sim 5.1 + ROS 2 Humble)
 
-This repository links Isaac Sim/Isaac Lab, the `isaacsim.ros2.bridge`, and a ROS 2 Nav2 + SLAM stack. The scripts hide all middleware setup so operators can launch the simulator and Nav2 stack with two commands.
+## Quick start (two terminals)
 
----
-
-## 1. Architecture overview
-
-- **Isaac Sim / Isaac Lab (`env_isaaclab_py311`)**  
-  Runs `src/isaac_go2_ros2.py`, publishes `/tf`, `/odom`, `/unitree_go2/lidar/point_cloud`, and exposes `/cmd_vel` subscriptions. The script auto-loads the Isaac ROS bridge libraries (FastDDS) and exports `ROS_DISTRO=humble`.
-
-- **ROS 2 Humble (`ros2_humble`)**  
-  `scripts/run_nav2_slam.sh` starts three helpers (base-footprint TF, point cloud → laser scan, scan QoS relay) and the Nav2 bringup with `slam_toolbox`. Everything uses FastDDS (`rmw_fastrtps_cpp`) and `ROS_DOMAIN_ID=0` to match the simulator.
-
----
-
-## 2. Requirements
-
-| Component | Notes |
-|-----------|-------|
-| Isaac Lab / Isaac Sim 5.1 | Installed inside `env_isaaclab_py311` (override via `GO2_ISAAC_ENV`). |
-| ROS 2 Humble (robostack)  | Includes `nav2_bringup`, `slam_toolbox`, `pointcloud_to_laserscan`. Default env name `ros2_humble`, override via `GO2_ROS_ENV`. |
-| GPU workstation           | Tested on Ubuntu 22.04, RTX 4090, CUDA/Vulkan stack from NVIDIA driver 550. |
-
-Run `scripts/after_clone.sh` once to create / update the ROS 2 environment automatically.
-
----
-
-## 3. Running the system
-
-### 3.1 Simulator terminal (Isaac Lab env)
+Terminal 1 (sim):
 
 ```bash
 ./scripts/run_go2.sh
-# Options:
-#   GO2_HEADLESS=1 ./scripts/run_go2.sh        # headless render
-#   GO2_ISAAC_ENV=my_env ./scripts/run_go2.sh  # custom Isaac env
-#   GO2_HEADLESS=1 GO2_MAX_STEPS=2000 ./scripts/run_go2.sh  # CI-style limited run
 ```
 
-What happens:
-- Activates the Isaac env.
-- Finds the `isaacsim.ros2.bridge` library path (fallback to known Kit path) and prepends it to `LD_LIBRARY_PATH`/`PATH`.
-- Forces FastDDS (`RMW_IMPLEMENTATION=rmw_fastrtps_cpp`) and `ROS_DISTRO=humble`.
-- Launches Isaac Sim and the Go2 controller.
-
-Wait until the simulator finishes loading and `/tf` appears (use `ros2 topic list` from another terminal) **before** starting Nav2.
-
-### 3.2 Nav2 + SLAM terminal (ROS 2 Humble env)
+Terminal 2 (Nav2 + SLAM):
 
 ```bash
 ./scripts/run_nav2_slam.sh
-# Options:
-#   GO2_NO_RVIZ=1 ./scripts/run_nav2_slam.sh        # skip RViz
-#   GO2_RVIZ_SOFTWARE=1 ./scripts/run_nav2_slam.sh  # software GL for thin clients
-#   GO2_USE_SIM_TIME=1 ./scripts/run_nav2_slam.sh   # opt into sim time
-#   GO2_RVIZ_CFG=nav2/go2_nav2_full.rviz            # custom RViz profile
 ```
 
-What happens:
-- Activates the ROS 2 env (robostack).
-- Starts `base_link → base_footprint` TF helper, pointcloud-to-scan converter, QoS relay to reliable `/scan`.
-- Launches `nav2_bringup` in SLAM mode with `nav2/nav2_slam_params.yaml`.
-- Waits for `/scan`, `/map`, `/tf`, then launches RViz (unless disabled).
-
-### 3.3 Stopping
-
-Use Ctrl‑C in each terminal. To guarantee Nav2 shutdown from any shell:
+Stop Nav2/SLAM from any shell:
 
 ```bash
 ./scripts/stop_nav2_slam.sh
 ```
 
----
+Wait until the simulator is fully loaded and publishing `/tf` before starting Nav2.
 
-## 4. Sanity checks
+## What this repo is
 
-After `run_go2.sh` finishes loading:
+This repo connects a Unitree Go2 simulation in Isaac Sim/Isaac Lab to a ROS 2 Nav2 + SLAM stack.
+The goal is: launch the simulator and get mapping + navigation working without manually sourcing a dozen scripts.
 
-```bash
-conda run -n ros2_humble ros2 topic list
-# Expect /tf, /tf_static, /unitree_go2/lidar/point_cloud
+## Setup (one-time)
 
-conda run -n ros2_humble ros2 run tf2_tools view_frames
-```
+You need two environments:
 
-While Nav2 is running:
+- **Isaac env** (default conda env name: `env_isaaclab_py311`): Isaac Lab/Sim 5.1 + Python entrypoint.
+- **ROS 2 env** (default conda env name: `ros2_humble`): ROS 2 Humble + `nav2_bringup` + `slam_toolbox` + `pointcloud_to_laserscan`.
 
-```bash
-conda run -n ros2_humble ros2 topic echo /scan --once
-conda run -n ros2_humble ros2 service call /slam_toolbox/async_reset std_srvs/srv/Empty
-```
-
-If `/tf` is missing, restart `run_go2.sh` and wait longer; the Nav2 stack must only be launched after the simulator publishes TF.
-
----
-
-## 5. Repository structure
-
-| Path | Purpose |
-|------|---------|
-| `scripts/run_go2.sh` | Simulator launcher + ROS bridge bootstrap. |
-| `src/isaac_go2_ros2.py` | Actual Isaac Sim entry point (policy, sensors, ROS transport). |
-| `scripts/run_nav2_slam.sh` | Nav2 + SLAM helper pipeline. |
-| `scripts/stop_nav2_slam.sh` | Best-effort shutdown for Nav2, scan relay, TF helper. |
-| `nav2/` | Nav2 params, RViz configs, FastDDS no-SHM profile. |
-
----
-
-## 6. Troubleshooting
-
-- **`librmw_*` errors during sim launch:** ensure you used `run_go2.sh`; it prepends the bundled ROS libs. If the warning persists, check that `~/miniconda3/envs/env_isaaclab_py311/.../isaacsim.ros2.bridge-*/humble/lib` exists.
-- **Nav2 spam “Invalid frame ID 'odom'”:** simulator didn’t publish TF yet or was stopped. Restart `run_go2.sh`, confirm `/tf`, then rerun Nav2.
-- **RViz crashes on remote desktop:** set `GO2_RVIZ_SOFTWARE=1` when running Nav2 (forces Mesa software GL).
-- **No `/scan` topic:** check `/scan_raw` first. The QoS relay only starts after `pointcloud_to_laserscan` is running.
-- **Need logs for support:** run `GO2_HEADLESS=1 ./scripts/run_go2.sh > debug/go2_run.log 2>&1 &` and `GO2_NO_RVIZ=1 ./scripts/run_nav2_slam.sh > debug/nav2_run.log 2>&1`, then share the log tails.
-
----
-
-## 7. Clean start commands (copy/paste checklist)
+If you use robostack, this helper can create/verify the ROS 2 environment:
 
 ```bash
-# Terminal 1
-cd /path/to/ISAAC-EXP
-./scripts/run_go2.sh
-
-# Terminal 2
-cd /path/to/ISAAC-EXP
-./scripts/run_nav2_slam.sh
-
-# Optional stop
-./scripts/stop_nav2_slam.sh
+./scripts/after_clone.sh
 ```
 
-That’s the complete workflow—nothing else needs manual export or sourcing. Once both terminals show healthy output (no TF errors, RViz map filling in), you can set Nav2 goals directly from RViz.
+This does not install Isaac Sim/Lab for you; it only helps with the ROS 2 side.
+
+If `./scripts/run_go2.sh` cannot find your Isaac env, set:
+
+- `GO2_ISAAC_ENV=your_env_name`
+
+If `./scripts/run_nav2_slam.sh` cannot find your ROS 2 env, set:
+
+- `GO2_ROS_ENV=your_env_name`
+
+## How it works (0 → 100)
+
+There are two processes, and they talk over ROS 2 (FastDDS):
+
+1) **Simulator side** (`./scripts/run_go2.sh`)
+
+- Activates the Isaac conda env.
+- Locates Isaac’s ROS 2 bridge libraries (`isaacsim.ros2.bridge`) and adjusts `LD_LIBRARY_PATH` so the bridge can load.
+- Forces FastDDS (`RMW_IMPLEMENTATION=rmw_fastrtps_cpp`) and `ROS_DOMAIN_ID=0`.
+- Runs `src/isaac_go2_ros2.py`, which publishes simulator state and sensors to ROS 2 and subscribes to `/cmd_vel`.
+
+2) **Navigation side** (`./scripts/run_nav2_slam.sh`)
+
+- Activates the ROS 2 conda env (robostack or whatever you use).
+- Converts the simulator LiDAR point cloud into a 2D laser scan:
+  - input: `/unitree_go2/lidar/point_cloud`
+  - output: `/scan_raw`
+- Relays `/scan_raw` to `/scan` with a QoS profile Nav2 expects.
+- Adds a small TF helper: `unitree_go2/base_link -> unitree_go2/base_footprint`.
+- Launches Nav2 in SLAM mode (`slam_toolbox`) using `nav2/nav2_slam_params.yaml`.
+- Optionally opens RViz.
+
+Important: the Isaac bridge in this repo timestamps messages using wall-time by default.
+Running Nav2 with sim time enabled can break TF/message filters unless the bridge publishes sim-time timestamps.
+
+## Where to change things
+
+- Simulator entrypoint: `src/isaac_go2_ros2.py`
+- Nav2 + SLAM launch pipeline: `scripts/run_nav2_slam.sh`
+- Nav2 configuration: `nav2/nav2_slam_params.yaml`
+- PointCloud → LaserScan parameters: `nav2/pointcloud_to_laserscan.yaml`
+- DDS profile (disables shared memory, helps in containers): `nav2/fastdds_no_shm.xml`
+- RViz configs: `nav2/go2_nav2.rviz`, `nav2/go2_nav2_full.rviz`
+
+## Useful options (details, not required)
+
+- Headless simulator: `GO2_HEADLESS=1 ./scripts/run_go2.sh`
+- Disable RViz: `GO2_NO_RVIZ=1 ./scripts/run_nav2_slam.sh`
+- Force software OpenGL for RViz (remote desktops): `GO2_RVIZ_SOFTWARE=1 ./scripts/run_nav2_slam.sh`
+- Opt into sim time (only if your bridge publishes sim time correctly): `GO2_USE_SIM_TIME=1 ./scripts/run_nav2_slam.sh`
+
+## Quick sanity checks
+
+In a ROS 2 terminal (the same one you use for Nav2), after the simulator is up:
+
+```bash
+ros2 topic list
+```
+
+Expect at least: `/tf`, `/tf_static`, `/unitree_go2/lidar/point_cloud`.
+
+After Nav2 is up:
+
+```bash
+ros2 topic echo /scan --once
+```
+
+## Troubleshooting (only the common stuff)
+
+- **Nav2 complains about TF / “Invalid frame ID 'odom'”**: start the sim first, wait for `/tf`, then start Nav2.
+- **No `/scan`**: check if `/scan_raw` exists; then check `/unitree_go2/lidar/point_cloud`.
+- **RViz crashes remotely**: use `GO2_RVIZ_SOFTWARE=1` or run RViz on a machine with a proper OpenGL stack.
