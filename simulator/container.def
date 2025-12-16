@@ -1,0 +1,94 @@
+Bootstrap: docker
+From: nvcr.io/nvidia/isaac-sim:5.1.0
+
+%post
+    # Set environment variables to avoid interactive prompts
+    export DEBIAN_FRONTEND=noninteractive
+    export TZ=UTC
+    
+    # Update package lists
+    apt-get update
+    
+    # Install basic utilities
+    apt-get install -y \
+        curl \
+        gnupg2 \
+        lsb-release \
+        software-properties-common \
+        wget \
+        sudo \
+        locales \
+        tzdata
+    
+    # Set up locale
+    locale-gen en_US en_US.UTF-8
+    update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+    export LANG=en_US.UTF-8
+
+    # ROS2 Humble setup
+    apt install software-properties-common -y
+    add-apt-repository universe
+    apt update && apt install curl -y
+    
+    export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F\" '{print $4}')
+    curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.$(. /etc/os-release && echo $VERSION_CODENAME)_all.deb"
+    dpkg -i /tmp/ros2-apt-source.deb
+    rm /tmp/ros2-apt-source.deb
+    apt update
+    
+    # Then proceed with ROS2 installation
+    apt-get update && apt-get install -y --no-install-recommends --allow-downgrades \
+        ros-humble-desktop \
+        python3-argcomplete \
+        ros-dev-tools \
+        ros-humble-rmw-cyclonedds-cpp \
+        ros-humble-rosidl-generator-dds-idl \
+        libfreetype6-dev \
+        libbrotli-dev \
+        libbrotli1=1.0.9-2build6
+    
+    # Install additional ROS2 tools
+    apt-get install -y \
+        python3-rosdep \
+        python3-rosinstall \
+        python3-rosinstall-generator \
+        python3-wstool \
+        build-essential \
+        python3-colcon-common-extensions \
+        python3-pip
+    
+    # Initialize rosdep
+    rosdep init || true
+
+%environment
+    # Set locale
+    export LANG=en_US.UTF-8
+    export LC_ALL=en_US.UTF-8
+    
+    # Source ROS2 setup
+    export ROS_DISTRO=humble
+    . /opt/ros/humble/setup.sh
+
+    # Add required modules to PATH
+    export PATH=/apps/conda/25.3.1/bin:/apps/conda/25.3.1/condabin:/apps/conda/scripts:$PATH
+    export PATH=/apps/tmux/3.5/bin:$PATH
+    export PATH=/apps/compilers/cuda/12.9.1/bin:$PATH
+
+    . /apps/conda/25.3.1/etc/profile.d/conda.sh
+
+%runscript
+    # Default behavior when container is run
+    exec /bin/bash "$@"
+
+%startscript
+    # Commands to run when container starts as an instance
+    echo "ROS2 Humble container started"
+
+%help
+    This container provides:
+    - Ubuntu 22.04 base
+    - ROS2 Humble desktop installation
+    - Pre-configured ROS2 environment
+    
+    To use:
+    apptainer exec container.sif bash
