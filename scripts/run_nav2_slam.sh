@@ -250,6 +250,11 @@ if [[ "${GO2_NO_RVIZ-0}" != "1" ]] && [[ -n "${DISPLAY-}" ]]; then
     else
       echo "[go2_nav2] NOTE: rqt_image_view not installed; skipping camera window." >&2
     fi
+    
+    # Launch prompt changer GUI for easy live prompt updates
+    echo "[go2_nav2] Launching prompt changer GUI..."
+    ( set +e; python3 "$ROOT_DIR/src/ros2/prompt_changer_gui.py" ) &
+    PROMPT_GUI_PID=$!
   fi
 
   wait "$NAV2_PID"
