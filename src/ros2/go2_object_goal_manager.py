@@ -22,6 +22,8 @@ from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from tf2_ros import Buffer, TransformListener
+import tf2_geometry_msgs
 
 try:  # vision_msgs is optional but required for detections
     from vision_msgs.msg import Detection2DArray
@@ -54,10 +56,11 @@ def _yaw_to_quaternion(yaw: float) -> tuple[float, float, float, float]:
 class ObjectPursuitNode(Node):
     def __init__(self) -> None:
         super().__init__("go2_object_pursuit")
-        target_xyz = _parse_target(os.environ.get("GO2_OBJECT_TARGET"))
-        self.target_x = target_xyz[0]
-        self.target_y = target_xyz[1]
-        self.target_yaw = target_xyz[2]
+        
+        # TF Buffer for robot pose
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        
         self.required_hits = int(os.environ.get("GO2_DETECTIONS_REQUIRED", "3"))
         self.target_label = os.environ.get("GO2_OBJECT_LABEL", "").strip().lower()
         pid_file = os.environ.get("GO2_FRONTIER_PID_FILE", "").strip()
@@ -66,6 +69,13 @@ class ObjectPursuitNode(Node):
         self._goal_in_flight = False
         self._goal_future = None
         self._goal_handle = None
+        
+        # Store last detection for calculating goal
+        self._last_detection_bbox = None  # (center_x, center_y, image_width, image_height)
+        
+        # Camera parameters (Go2 front camera from sim)
+        self.camera_hfov = 69.4  # degrees (horizontal field of view)
+        self.approach_distance = 2.0  # meters to approach object
 
         topic = os.environ.get("GO2_DETECTION_TOPIC", "/go2/object_detections")
         self.get_logger().info(
@@ -125,22 +135,39 @@ class ObjectPursuitNode(Node):
             return
         if not msg.detections:
             return
+        
+        # Find matching detection and store its bounding box
+        matched_detection = None
         if self.target_label:
-            matched = False
             for detection in msg.detections:
                 for result in detection.results:
                     label = getattr(result.hypothesis, "class_id", "")
                     if isinstance(label, str) and label.lower() == self.target_label:
-                        matched = True
+                        matched_detection = detection
                         break
-                if matched:
+                if matched_detection:
                     break
-            if not matched:
+            if not matched_detection:
                 return
+        else:
+            # Take first detection if no specific label
+            matched_detection = msg.detections[0]
+        
+        # Store bbox info (center position + image dimensions)
+        # Assume image is 640x480 (Go2 camera default)
+        bbox = matched_detection.bbox
+        self._last_detection_bbox = (
+            bbox.center.position.x,
+            bbox.center.position.y,
+            640.0,  # image width
+            480.0   # image height
+        )
+        
         self._detections_seen += 1
         self.get_logger().info(
-            "Detection confirmation %d/%d"
-            % (self._detections_seen, self.required_hits)
+            "Detection confirmation %d/%d (bbox center: %.1f, %.1f)"
+            % (self._detections_seen, self.required_hits, 
+               bbox.center.position.x, bbox.center.position.y)
         )
         if self._detections_seen >= self.required_hits:
             self._begin_object_pursuit()
@@ -148,13 +175,56 @@ class ObjectPursuitNode(Node):
     def _begin_object_pursuit(self) -> None:
         if self._goal_in_flight:
             return
+        if not self._last_detection_bbox:
+            self.get_logger().error("No detection bbox stored!")
+            return
+            
         self._goal_in_flight = True
-        self._publish_mode("PURSUIT")  # Notify GUI
+        self._publish_mode("PURSUING")  # Notify GUI
         self._stop_frontier_process()
+        
+        # Get robot's current pose
+        try:
+            trans = self.tf_buffer.lookup_transform(
+                'map', 'unitree_go2/base_link', rclpy.time.Time()
+            )
+            robot_x = trans.transform.translation.x
+            robot_y = trans.transform.translation.y
+            
+            # Get robot's current yaw
+            quat = trans.transform.rotation
+            siny_cosp = 2.0 * (quat.w * quat.z + quat.x * quat.y)
+            cosy_cosp = 1.0 - 2.0 * (quat.y * quat.y + quat.z * quat.z)
+            robot_yaw = math.atan2(siny_cosp, cosy_cosp)
+            
+        except Exception as e:
+            self.get_logger().error(f"Could not get robot pose: {e}")
+            self._goal_in_flight = False
+            return
+        
+        # Calculate bearing to object from bbox
+        bbox_cx, _, img_w, _ = self._last_detection_bbox
+        
+        # Horizontal offset from image center (normalized -0.5 to 0.5)
+        offset_normalized = (bbox_cx - img_w / 2.0) / img_w
+        
+        # Convert to angle using camera HFOV
+        bearing_offset = offset_normalized * math.radians(self.camera_hfov)
+        
+        # Object direction = robot yaw + bearing offset
+        object_direction = robot_yaw + bearing_offset
+        
+        # Goal position: approach_distance meters in direction of object
+        goal_x = robot_x + self.approach_distance * math.cos(object_direction)
+        goal_y = robot_y + self.approach_distance * math.sin(object_direction)
+        
         self.get_logger().info(
-            "Sending NavigateToPose goal to (%.2f, %.2f, yaw=%.2f)"
-            % (self.target_x, self.target_y, self.target_yaw)
+            "Navigating to object: robot=(%.2f, %.2f, yaw=%.2f°) → goal=(%.2f, %.2f) "
+            "bearing_offset=%.1f°"
+            % (robot_x, robot_y, math.degrees(robot_yaw),
+               goal_x, goal_y, math.degrees(bearing_offset))
         )
+        
         if not self.client.wait_for_server(timeout_sec=10.0):
             self.get_logger().error("Nav2 action server not available")
             self._goal_in_flight = False
@@ -163,10 +233,10 @@ class ObjectPursuitNode(Node):
         pose = PoseStamped()
         pose.header.frame_id = "map"
         pose.header.stamp = self.get_clock().now().to_msg()
-        pose.pose.position.x = self.target_x
-        pose.pose.position.y = self.target_y
+        pose.pose.position.x = goal_x
+        pose.pose.position.y = goal_y
         pose.pose.position.z = 0.0
-        qx, qy, qz, qw = _yaw_to_quaternion(self.target_yaw)
+        qx, qy, qz, qw = _yaw_to_quaternion(object_direction)
         pose.pose.orientation.x = qx
         pose.pose.orientation.y = qy
         pose.pose.orientation.z = qz

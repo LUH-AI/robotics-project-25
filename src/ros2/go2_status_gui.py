@@ -104,6 +104,11 @@ class Go2StatusGUI(Node):
             bg_color = "#00AA00"  # Green
             detail_text = f"Target found and reached!\nReady for new search"
             button_text = "Start New Search"
+        elif self.current_mode == "PURSUING":
+            status_text = "→ PURSUING OBJECT"
+            bg_color = "#FFA500"  # Orange
+            detail_text = f"Navigating to detected object..."
+            button_text = "Update"
         elif self.object_detected:
             status_text = "✓ OBJECT DETECTED"
             bg_color = "#FFA500"  # Orange
