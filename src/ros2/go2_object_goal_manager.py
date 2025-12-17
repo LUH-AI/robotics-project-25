@@ -199,16 +199,36 @@ class ObjectPursuitNode(Node):
             import time
             time_pursuing = time.time() - self.pursuit_start_time if self.pursuit_start_time else 0
             
-            if bbox_percentage >= self.target_bbox_percentage and time_pursuing >= self.min_pursuit_time:
+            # Track bbox history for stability check
+            self.bbox_history.append(bbox_percentage)
+            if len(self.bbox_history) > 5:
+                self.bbox_history.pop(0)  # Keep last 5
+            
+            # Check if bbox is stable (not growing much)
+            is_stable = False
+            if len(self.bbox_history) >= 3:
+                recent = self.bbox_history[-3:]
+                max_diff = max(recent) - min(recent)
+                is_stable = max_diff < 0.03  # Less than 3% variance = stable
+            
+            # Stop if: (reached 50% target) OR (at 40%+ and stable and enough time)
+            stop_condition_met = (
+                (bbox_percentage >= self.target_bbox_percentage) or
+                (bbox_percentage >= self.stable_bbox_percentage and is_stable)
+            ) and time_pursuing >= self.min_pursuit_time
+            
+            if stop_condition_met:
+                reason = "target 50%" if bbox_percentage >= 0.50 else "stable at 40%+"
                 self.get_logger().info(
-                    f"Object reached! Bbox={bbox_percentage*100:.1f}% of frame (target={self.target_bbox_percentage*100:.0f}%), "
-                    f"pursued for {time_pursuing:.1f}s"
+                    f"Object reached ({reason})! Bbox={bbox_percentage*100:.1f}% "
+                    f"(target={self.target_bbox_percentage*100:.0f}%), pursued for {time_pursuing:.1f}s"
                 )
                 # Cancel goal and mark as complete
                 if self._goal_handle:
                     self._goal_handle.cancel_goal_async()
                 self._goal_in_flight = False
                 self.pursuit_start_time = None
+                self.bbox_history = []
                 self._publish_mode("PURSUIT")  # Search complete
                 self.destroy_node()
                 rclpy.shutdown()
