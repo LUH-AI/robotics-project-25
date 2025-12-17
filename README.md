@@ -7,6 +7,7 @@ Terminal 1 (sim):
 ```bash
 ./scripts/run_go2.sh
 ```
+# Default environment is now **office** (see `src/cfg/sim.yaml`)
 
 Terminal 2 (Nav2 + SLAM):
 

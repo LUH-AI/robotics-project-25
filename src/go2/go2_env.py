@@ -184,6 +184,6 @@ def camera_follow(env):
         yaw = rotation.as_euler('zyx')[0]
         yaw_rotation = R.from_euler('z', yaw).as_matrix()
         set_camera_view(
-            yaw_rotation.dot(np.asarray([-4.0, 0.0, 5.0])) + robot_position,
+            yaw_rotation.dot(np.asarray([-2.0, 0.0, 2.5])) + robot_position,
             robot_position
         )
