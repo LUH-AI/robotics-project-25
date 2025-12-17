@@ -71,6 +71,9 @@ cleanup() {
   if [[ -n "${IMAGE_VIEW_PID-}" ]] && kill -0 "$IMAGE_VIEW_PID" 2>/dev/null; then
     kill -TERM "$IMAGE_VIEW_PID" 2>/dev/null || true
   fi
+  if [[ -n "${PROMPT_GUI_PID-}" ]] && kill -0 "$PROMPT_GUI_PID" 2>/dev/null; then
+    kill -TERM "$PROMPT_GUI_PID" 2>/dev/null || true
+  fi
   if [[ -n "${RVIZ_PID-}" ]] && kill -0 "$RVIZ_PID" 2>/dev/null; then
     kill -TERM "$RVIZ_PID" 2>/dev/null || true
   fi
