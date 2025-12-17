@@ -59,6 +59,16 @@ cleanup() {
   rm -f "$FRONTIER_PID_FILE" >/dev/null 2>&1 || true
   return $code
 }
+# Kill any zombie processes from previous runs
+echo "[start_agent] Cleaning up zombie processes..."
+pkill -9 -f "python.*go2_object_detection_node.py" 2>/dev/null || true
+pkill -9 -f "explorer.py" 2>/dev/null || true
+pkill -9 -f "go2_status_gui.py" 2>/dev/null || true
+pkill -9 -f "go2_object_goal_manager.py" 2>/dev/null || true
+pkill -9 -f "lifecycle_manager_slam" 2>/dev/null || true
+sleep 1
+echo "[start_agent] Cleanup complete."
+
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -75,28 +85,9 @@ echo "[start_agent] Launching Nav2 + SLAM pipeline..."
 "$ROOT_DIR/scripts/run_nav2_slam.sh" &
 NAV2_STACK_PID=$!
 
-wait_for_topic() {
-  local topic="$1"
-  local timeout="${2:-60}"
-  local start
-  start=$(date +%s)
-  while true; do
-    if ros2 topic list 2>/dev/null | grep -q "^${topic}$"; then
-      return 0
-    fi
-    sleep 1
-    local now
-    now=$(date +%s)
-    if (( now - start > timeout )); then
-      echo "[start_agent] Timeout waiting for topic ${topic}" >&2
-      return 1
-    fi
-  done
-}
-
-# Wait for /map so frontier exploration has data.
-echo "[start_agent] Waiting for /map topic..."
-wait_for_topic "/map" 90
+# Give Nav2/SLAM a few seconds to start up
+echo "[start_agent] Waiting for Nav2/SLAM to initialize..."
+sleep 5
 
 echo "[start_agent] Waiting for Nav2 action server..."
 nav2_ready=0
