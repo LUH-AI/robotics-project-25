@@ -75,13 +75,15 @@ class ObjectPursuitNode(Node):
         
         # Camera parameters (Go2 front camera from sim)
         self.camera_hfov = 69.4  # degrees (horizontal field of view)
-        self.approach_distance = 1.5  # meters to move per update
+        self.approach_distance = 2.0  # meters to move per update (increased for closer approach)
         
         # Visual servoing parameters
-        self.target_bbox_size = 150.0  # pixels (when to stop - object close enough)
-        self.min_bbox_size = 30.0      # pixels (ignore tiny detections)
-        self.goal_update_rate = 0.5    # seconds between goal updates
+        self.target_bbox_percentage = 0.25  # Stop when bbox is 25% of frame
+        self.min_bbox_percentage = 0.05     # Ignore detections < 5% of frame (noise)
+        self.goal_update_rate = 0.5         # seconds between goal updates
         self.last_goal_update_time = 0.0
+        self.pursuit_start_time = None      # Track when pursuit started
+        self.min_pursuit_time = 5.0         # Minimum 5 seconds before can stop
 
         topic = os.environ.get("GO2_DETECTION_TOPIC", "/go2/object_detections")
         self.get_logger().info(
@@ -94,8 +96,9 @@ class ObjectPursuitNode(Node):
         self.client = ActionClient(self, NavigateToPose, "navigate_to_pose")
         
         # Publisher for status GUI
-        from std_msgs.msg import String
+        from std_msgs.msg import String, Bool
         self.mode_pub = self.create_publisher(String, "/go2/agent_mode", 10)
+        self.exploration_pub = self.create_publisher(Bool, "/go2/exploration/enable", 10)
         
         # Subscribe to prompt changes to reset search
         self.prompt_sub = self.create_subscription(
@@ -131,10 +134,18 @@ class ObjectPursuitNode(Node):
                 cancel_future = self._goal_handle.cancel_goal_async()
                 self._goal_in_flight = False
         
-        # Reset detection counter
+        # Reset detection counter and pursuit timer
         self._detections_seen = 0
+        self.pursuit_start_time = None
         self._publish_mode("SEARCHING")
-        self.get_logger().info(f"New search started with prompt: '{msg.data}'")
+        
+        # Restart exploration
+        from std_msgs.msg import Bool
+        enable_msg = Bool()
+        enable_msg.data = True
+        self.exploration_pub.publish(enable_msg)
+        
+        self.get_logger().info(f"New search started with prompt: '{msg.data}' - exploration restarted")
 
     def _detection_cb(self, msg: Detection2DArray) -> None:
         if not msg.detections:
@@ -161,33 +172,44 @@ class ObjectPursuitNode(Node):
         bbox = matched_detection.bbox
         bbox_width = bbox.size_x
         bbox_height = bbox.size_y
-        bbox_size = max(bbox_width, bbox_height)  # Use larger dimension
         
-        # Store bbox info (center position + image dimensions + size)
+        # Calculate bbox as percentage of frame
+        img_w, img_h = 640.0, 480.0
+        bbox_pct_w = bbox_width / img_w
+        bbox_pct_h = bbox_height / img_h
+        bbox_percentage = max(bbox_pct_w, bbox_pct_h)
+        
+        # Store bbox info (center position + image dimensions + percentage)
         self._last_detection_bbox = (
             bbox.center.position.x,
             bbox.center.position.y,
             640.0,  # image width
             480.0,  # image height
-            bbox_size
+            bbox_percentage
         )
         
-        # Check if object is close enough (bbox is large)
-        if self._goal_in_flight and bbox_size >= self.target_bbox_size:
-            self.get_logger().info(
-                f"Object reached! Bbox size={bbox_size:.1f}px >= target={self.target_bbox_size}px"
-            )
-            # Cancel goal and mark as complete
-            if self._goal_handle:
-                self._goal_handle.cancel_goal_async()
-            self._goal_in_flight = False
-            self._publish_mode("PURSUIT")  # Search complete
-            self.destroy_node()
-            rclpy.shutdown()
-            return
+        # Check if object is close enough (bbox is large AND enough time passed)
+        if self._goal_in_flight:
+            import time
+            time_pursuing = time.time() - self.pursuit_start_time if self.pursuit_start_time else 0
+            
+            if bbox_percentage >= self.target_bbox_percentage and time_pursuing >= self.min_pursuit_time:
+                self.get_logger().info(
+                    f"Object reached! Bbox={bbox_percentage*100:.1f}% of frame (target={self.target_bbox_percentage*100:.0f}%), "
+                    f"pursued for {time_pursuing:.1f}s"
+                )
+                # Cancel goal and mark as complete
+                if self._goal_handle:
+                    self._goal_handle.cancel_goal_async()
+                self._goal_in_flight = False
+                self.pursuit_start_time = None
+                self._publish_mode("PURSUIT")  # Search complete
+                self.destroy_node()
+                rclpy.shutdown()
+                return
         
         # Ignore tiny detections (noise/far away)
-        if bbox_size < self.min_bbox_size:
+        if bbox_percentage < self.min_bbox_percentage:
             return
         
         # If not pursuing yet, count confirmations
@@ -196,7 +218,7 @@ class ObjectPursuitNode(Node):
             self.get_logger().info(
                 f"Detection {self._detections_seen}/{self.required_hits} - "
                 f"bbox @ ({bbox.center.position.x:.0f}, {bbox.center.position.y:.0f}) "
-                f"size={bbox_size:.1f}px"
+                f"coverage={bbox_percentage*100:.1f}%"
             )
             if self._detections_seen >= self.required_hits:
                 self._begin_object_pursuit()
@@ -260,6 +282,10 @@ class ObjectPursuitNode(Node):
         self._publish_mode("PURSUING")  # Notify GUI
         self._stop_frontier_process()
         
+        # Start pursuit timer
+        import time
+        self.pursuit_start_time = time.time()
+        
         # Send initial goal
         self._send_pursuit_goal()
     
@@ -271,11 +297,14 @@ class ObjectPursuitNode(Node):
             self._goal_in_flight = False
             return
         
-        goal_x, goal_y, object_direction, bbox_size = goal_data
+        goal_x, goal_y, object_direction, bbox_percentage = goal_data
+        
+        import time
+        time_pursuing = time.time() - self.pursuit_start_time if self.pursuit_start_time else 0
         
         self.get_logger().info(
             f"Visual servoing: goal=({goal_x:.2f}, {goal_y:.2f}) "
-            f"bearing={math.degrees(object_direction - math.atan2(0,1)):.1f}° bbox_size={bbox_size:.1f}px"
+            f"bbox={bbox_percentage*100:.1f}% time={time_pursuing:.1f}s"
         )
         
         if not self.client.wait_for_server(timeout_sec=1.0):

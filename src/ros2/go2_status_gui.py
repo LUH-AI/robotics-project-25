@@ -203,6 +203,11 @@ if __name__ == '__main__':
     def on_update_prompt():
         new_prompt = prompt_entry.get()
         gui_node.update_prompt(new_prompt)
+        
+        # If this is "Start New Search" (mode is PURSUIT), auto-enable exploration
+        if gui_node.current_mode == "PURSUIT":
+            exploration_var.set(True)
+            gui_node.toggle_exploration(True)
     
     update_button = tk.Button(
         prompt_frame,
