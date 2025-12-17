@@ -207,14 +207,8 @@ NAV2_PID=$NAV2_PID
 DETECTION_PID=${DETECTION_PID:-}
 EOF
 
-echo "[go2_nav2] Waiting for /scan and /map to appear..."
-for _ in $(seq 1 60); do
-  topics="$(ros2 topic list 2>/dev/null || true)"
-  if echo "$topics" | grep -q "^/scan$" && echo "$topics" | grep -q "^/map$" && echo "$topics" | grep -q "^/tf$"; then
-    break
-  fi
-  sleep 1
-done
+# Launch RViz immediately - topics will appear when ready
+
 
 if [[ "${GO2_NO_RVIZ-0}" != "1" ]] && [[ -n "${DISPLAY-}" ]]; then
   profile="${GO2_RVIZ_PROFILE:-slam}"
