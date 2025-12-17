@@ -17,3 +17,5 @@ outputs/
 logs/
 *.log
 !debug/*.log
+object-detection/sam3_modelscope/sam3.pt
+object-detection/sam3_modelscope/model.safetensors
