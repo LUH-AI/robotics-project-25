@@ -46,8 +46,17 @@ class Go2StatusGUI(Node):
             10
         )
         
-        # Track current prompt
+        # Publisher for exploration enable/disable
+        from std_msgs.msg import Bool
+        self.exploration_pub = self.create_publisher(
+            Bool,
+            '/go2/exploration/enable',
+            10
+        )
+        
+        # Track current prompt and exploration state
         self.current_prompt = "green cube."
+        self.exploration_enabled = False  # Start paused
         
         self.get_logger().info("Go2 Status GUI initialized")
         
@@ -76,6 +85,16 @@ class Go2StatusGUI(Node):
             self.prompt_pub.publish(msg)
             self.current_prompt = new_prompt.strip()
             self.get_logger().info(f"Updated detection prompt to: '{self.current_prompt}'")
+    
+    def toggle_exploration(self, enabled):
+        """Enable or disable frontier exploration"""
+        from std_msgs.msg import Bool
+        msg = Bool()
+        msg.data = enabled
+        self.exploration_pub.publish(msg)
+        self.exploration_enabled = enabled
+        state = "ENABLED" if enabled else "PAUSED"
+        self.get_logger().info(f"Exploration {state}")
     
     def update_gui(self):
         """Update the GUI with current status"""
@@ -124,7 +143,7 @@ if __name__ == '__main__':
     # Create GUI window
     root = tk.Tk()
     root.title("Go2 Agent Status")
-    root.geometry("500x320")
+    root.geometry("500x380")
     root.configure(bg='#1a1a1a')
     
     # Make window always on top
@@ -194,6 +213,29 @@ if __name__ == '__main__':
     )
     update_button.pack(side=tk.LEFT)
 
+    # Create exploration control section
+    exploration_frame = tk.Frame(root, bg='#1a1a1a', pady=10)
+    exploration_frame.pack(fill=tk.X, padx=20)
+    
+    exploration_var = tk.BooleanVar(value=False)  # Start paused
+    
+    def on_toggle_exploration():
+        enabled = exploration_var.get()
+        gui_node.toggle_exploration(enabled)
+    
+    exploration_check = tk.Checkbutton(
+        exploration_frame,
+        text="Enable Frontier Exploration",
+        font=("Arial", 12, "bold"),
+        bg="#1a1a1a",
+        fg="white",
+        selectcolor="#2a2a2a",
+        activebackground="#1a1a1a",
+        activeforeground="white",
+        variable=exploration_var,
+        command=on_toggle_exploration
+    )
+    exploration_check.pack(side=tk.LEFT, padx=10)
     
     # Create ROS2 node
     gui_node = Go2StatusGUI(root)
