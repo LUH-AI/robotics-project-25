@@ -228,35 +228,135 @@ class Go2GroundedSAM2Node(Node):
             if self.detections_pub is not None:
                 self._publish_detections(msg, result)
             if bridge is not None:
-                annotated = draw_detections(bgr, result)
+                # Select best target and draw with color coding
+                annotated = self._draw_detections_with_selection(bgr, result)
                 out_msg = bridge.cv2_to_imgmsg(annotated, encoding="bgr8")
                 out_msg.header = msg.header
                 self.image_pub.publish(out_msg)
 
+    def _select_best_target(self, result, img_width, img_height):
+        """Select detection closest to image center"""
+        if len(result.boxes_xyxy) == 0:
+            return None
+        
+        center_x = img_width / 2.0
+        center_y = img_height / 2.0
+        
+        best_idx = None
+        min_distance = float('inf')
+        
+        for i, box in enumerate(result.boxes_xyxy):
+            bbox_cx = (box[0] + box[2]) * 0.5
+            bbox_cy = (box[1] + box[3]) * 0.5
+            
+            # Distance to center
+            import math
+            dist = math.sqrt((bbox_cx - center_x)**2 + (bbox_cy - center_y)**2)
+            
+            if dist < min_distance:
+                min_distance = dist
+                best_idx = i
+        
+        return best_idx
+    
+    def _draw_detections_with_selection(self, bgr, result):
+        """Draw detections with green for selected, yellow for others"""
+        import cv2
+        overlay = bgr.copy()
+        
+        if len(result.boxes_xyxy) == 0:
+            return overlay
+        
+        img_height, img_width = bgr.shape[:2]
+        selected_idx = self._select_best_target(result, img_width, img_height)
+        
+        for i, (box, score, label) in enumerate(zip(result.boxes_xyxy, result.scores, result.labels)):
+            x1, y1, x2, y2 = map(int, box)
+            
+            # Color code: green for selected, yellow for others
+            if i == selected_idx:
+                color = (0, 255, 0)  # Green (BGR)
+                label_text = f"{label} {score:.2f} 🎯"
+                thickness = 3
+            else:
+                color = (0, 255, 255)  # Yellow (BGR)
+                label_text = f"{label} {score:.2f}"
+                thickness = 2
+            
+            # Draw bbox
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), color, thickness)
+            
+            # Draw label background
+            (text_width, text_height), _ = cv2.getTextSize(
+                label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
+            )
+            cv2.rectangle(
+                overlay,
+                (x1, y1 - text_height - 10),
+                (x1 + text_width, y1),
+                color,
+                -1
+            )
+            
+            # Draw label text
+            cv2.putText(
+                overlay,
+                label_text,
+                (x1, y1 - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 0),  # Black text
+                2
+            )
+        
+        return overlay
+    
     def _publish_detections(self, src_msg: Image, result) -> None:
+        """Publish only the selected best target"""
+        if len(result.boxes_xyxy) == 0:
+            # Publish empty array
+            arr = Detection2DArray()
+            arr.header = src_msg.header
+            self.detections_pub.publish(arr)
+            return
+        
+        # Get image dimensions from message
+        img_width = src_msg.width
+        img_height = src_msg.height
+        
+        # Select best target
+        selected_idx = self._select_best_target(result, img_width, img_height)
+        if selected_idx is None:
+            arr = Detection2DArray()
+            arr.header = src_msg.header
+            self.detections_pub.publish(arr)
+            return
+        
+        # Publish only selected detection
         arr = Detection2DArray()
         arr.header = src_msg.header
-        detections = 0
-        for box, score, label in zip(result.boxes_xyxy, result.scores, result.labels):
-            det = Detection2D()
-            det.header = src_msg.header
-            bbox = BoundingBox2D()
-            # BoundingBox2D.center is a Pose2D (has position.x/position.y, not x/y directly)
-            bbox.center.position.x = float((box[0] + box[2]) * 0.5)
-            bbox.center.position.y = float((box[1] + box[3]) * 0.5)
-            bbox.center.theta = 0.0
-            bbox.size_x = float(max(0.0, box[2] - box[0]))
-            bbox.size_y = float(max(0.0, box[3] - box[1]))
-            det.bbox = bbox
+        
+        box = result.boxes_xyxy[selected_idx]
+        score = result.scores[selected_idx]
+        label = result.labels[selected_idx]
+        
+        det = Detection2D()
+        det.header = src_msg.header
+        bbox = BoundingBox2D()
+        # BoundingBox2D.center is a Pose2D (has position.x/position.y, not x/y directly)
+        bbox.center.position.x = float((box[0] + box[2]) * 0.5)
+        bbox.center.position.y = float((box[1] + box[3]) * 0.5)
+        bbox.center.theta = 0.0
+        bbox.size_x = float(max(0.0, box[2] - box[0]))
+        bbox.size_y = float(max(0.0, box[3] - box[1]))
+        det.bbox = bbox
 
-            hyp = ObjectHypothesisWithPose()
-            hyp.hypothesis.class_id = label
-            hyp.hypothesis.score = float(score)
-            det.results.append(hyp)
+        hyp = ObjectHypothesisWithPose()
+        hyp.hypothesis.class_id = label
+        hyp.hypothesis.score = float(score)
+        det.results.append(hyp)
 
-            arr.detections.append(det)
-            detections += 1
-
+        arr.detections.append(det)
         self.detections_pub.publish(arr)
         if detections:
             label_counts = {}
