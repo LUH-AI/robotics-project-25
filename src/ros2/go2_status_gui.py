@@ -81,21 +81,25 @@ class Go2StatusGUI(Node):
         """Update the GUI with current status"""
         # Determine display text and color
         if self.current_mode == "PURSUIT":
-            status_text = "🎯 OBJECT PURSUIT MODE"
+            status_text = "✓ SEARCH COMPLETE!"
             bg_color = "#00AA00"  # Green
-            detail_text = f"Navigating to detected object"
+            detail_text = f"Target found and reached!\nReady for new search"
+            button_text = "Start New Search"
         elif self.object_detected:
             status_text = "✓ OBJECT DETECTED"
             bg_color = "#FFA500"  # Orange
             detail_text = f"Found {self.detection_count} object(s)\nSwitching to pursuit..."
+            button_text = "Update"
         else:
             status_text = "🔍 SEARCHING MODE"
             bg_color = "#0066CC"  # Blue
             detail_text = "Frontier Exploration Active"
+            button_text = "Update"
         
         # Update labels
         mode_label.config(text=status_text, bg=bg_color)
         detail_label.config(text=detail_text)
+        update_button.config(text=button_text)
         
         # Schedule next update
         self.root.after(100, self.update_gui)
