@@ -405,6 +405,13 @@ def run_simulator(cfg):
     elif (cfg.env_name == "office"):
         sim_env.create_office_env() # office
 
+    if os.environ.get("GO2_ENABLE_DETECTION_CUBE", "1").lower() not in ("0", "false", "no"):
+        try:
+            sim_env.spawn_detection_cube(cfg.num_envs)
+            print("[go2_sim] Detection test cube spawned in front of Go2 base.")
+        except Exception as exc:
+            print(f"[WARN] Failed to spawn detection cube: {exc}")
+
     # Sensor setup
     sm = go2_sensors.SensorManager(cfg.num_envs)
     lidar_annotators = sm.add_rtx_lidar(getattr(cfg.sensor, "lidar_config", None))
