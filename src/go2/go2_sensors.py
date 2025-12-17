@@ -64,20 +64,23 @@ class SensorManager:
         cameras = []
         for env_idx in range(self.num_envs):
             prim_path = f"/World/envs/env_{env_idx}/Go2/base/radar/front_cam"
+
+            # The stock radar prim sits slightly recessed in the head shell. Keep the camera
+            # slightly outside the visor but maintain the forward-looking yaw.
+            cam_offset_local = np.array([-0.0619, 0.0, -0.0684])
+            cam_orientation = rot_utils.euler_angles_to_quats(np.array([0, 180, 0]), degrees=True)
+
             camera = Camera(
                 prim_path=prim_path,
-                # Attach directly to the radar housing so the transform matches exactly.
-                translation=np.array([0.0, 0.0, 0.0]),
+                translation=cam_offset_local,
                 frequency=freq,
                 resolution=(640, 480),
-                # Face the same direction as the radar (180° yaw relative to base X-forward).
-                orientation=rot_utils.euler_angles_to_quats(np.array([0, 0, 180]), degrees=True),
+                orientation=cam_orientation,
             )
             camera.initialize()
             camera.set_focal_length(1.5)
             # Keep near plane very small so close obstacles are visible in the RGB feed.
-            # Keep near plane very small so close obstacles are visible in the RGB feed.
             clipping_attr = camera.prim.GetAttribute("clippingRange")
-            clipping_attr.Set(Gf.Vec2f((0.01, 200.0)))
+            clipping_attr.Set(Gf.Vec2f(0.01, 200.0))
             cameras.append(camera)
         return cameras
