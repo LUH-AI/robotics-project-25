@@ -1,12 +1,15 @@
-"""ROS 2 helper node: switch from frontier exploration to object pursuit.
+"""ROS 2 helper node: robust visual servoing for object pursuit.
 
 Listens to `/go2/object_detections` (SAM3 realtime output). When detections
-match the requested label a configurable number of times, the node cancels the
-frontier explorer process and sends a NavigateToPose goal to Nav2.
+match the requested label consistently, switches from exploration to pursuit
+using visual servoing with Nav2.
 
-The target location defaults to the detection cube location used inside the
-simulator (3m ahead, 1m to the left in the map frame), but can be overridden via
-`GO2_OBJECT_TARGET="x,y,yaw"`.
+Features:
+- Detection instance locking (doesn't jump between targets)
+- EMA smoothing for bearing and bbox size
+- Dynamic step sizing (rotate-first when off-center)
+- Goal update gating (prevents Nav2 thrashing)
+- Lost-detection watchdog with auto-return to exploration
 """
 
 from __future__ import annotations
@@ -14,16 +17,18 @@ from __future__ import annotations
 import math
 import os
 import signal
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import rclpy
+from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from tf2_ros import Buffer, TransformListener
-import tf2_geometry_msgs
 
 try:  # vision_msgs is optional but required for detections
     from vision_msgs.msg import Detection2DArray
@@ -34,23 +39,26 @@ except Exception as exc:  # pragma: no cover - ROS only
     ) from exc
 
 
-def _parse_target(raw: str | None) -> tuple[float, float, float]:
-    if not raw:
-        return (3.0, 1.0, 0.0)
-    try:
-        parts = [float(p.strip()) for p in raw.split(",") if p.strip()]
-        if len(parts) == 2:
-            return (parts[0], parts[1], 0.0)
-        if len(parts) >= 3:
-            return (parts[0], parts[1], parts[2])
-    except Exception:
-        pass
-    return (3.0, 1.0, 0.0)
+def _wrap_angle(a: float) -> float:
+    """Wrap angle to [-pi, pi]"""
+    return math.atan2(math.sin(a), math.cos(a))
 
 
 def _yaw_to_quaternion(yaw: float) -> tuple[float, float, float, float]:
-    half = yaw * 0.5
-    return (0.0, 0.0, math.sin(half), math.cos(half))
+    """Convert yaw (radians) to quaternion (x, y, z, w)."""
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+    return (0.0, 0.0, sy, cy)
+
+
+@dataclass
+class _DetMeas:
+    """Detection measurement"""
+    cx: float               # bbox center x (pixels)
+    cy: float               # bbox center y (pixels)
+    offset_norm: float      # horizontal offset from center [-0.5, 0.5]
+    bbox_pct: float         # max(width, height) as fraction of frame [0, 1]
+    score: float           # detection confidence
 
 
 class ObjectPursuitNode(Node):
@@ -61,40 +69,71 @@ class ObjectPursuitNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         
+        # Frames (configurable)
+        self.map_frame = os.environ.get("GO2_MAP_FRAME", "map").strip()
+        self.base_frame = os.environ.get("GO2_BASE_FRAME", "unitree_go2/base_link").strip()
+        
+        # Target configuration
         self.required_hits = int(os.environ.get("GO2_DETECTIONS_REQUIRED", "3"))
         self.target_label = os.environ.get("GO2_OBJECT_LABEL", "").strip().lower()
         pid_file = os.environ.get("GO2_FRONTIER_PID_FILE", "").strip()
         self.frontier_pid_file = Path(pid_file) if pid_file else None
-        self._detections_seen = 0
-        self._goal_in_flight = False
-        self._goal_future = None
-        self._goal_handle = None
-        
-        # Store last detection for calculating goal
-        self._last_detection_bbox = None  # (center_x, center_y, image_width, image_height)
         
         # Camera parameters (Go2 front camera from sim)
         self.camera_hfov = 69.4  # degrees (horizontal field of view)
-        self.approach_distance = 2.0  # meters to move per update (increased for closer approach)
+        
+        # Detection robustness
+        self.min_score = float(os.environ.get("GO2_MIN_DETECTION_SCORE", "0.25"))
+        self.candidate_px_gate = float(os.environ.get("GO2_CANDIDATE_PX_GATE", "80"))  # px for hit counting
+        self.lock_px_gate = float(os.environ.get("GO2_LOCK_PX_GATE", "140"))          # px when pursuing
         
         # Visual servoing parameters
         self.target_bbox_percentage = 0.50  # Stop when bbox is 50% of frame (close!)
         self.stable_bbox_percentage = 0.40  # Can stop at 40% if stable (not growing)
         self.min_bbox_percentage = 0.05     # Ignore detections < 5% of frame (noise)
         self.goal_update_rate = 0.5         # seconds between goal updates
-        self.last_goal_update_time = 0.0
-        self.pursuit_start_time = None      # Track when pursuit started
         self.min_pursuit_time = 5.0         # Minimum 5 seconds before can stop
         
-        # Stability tracking - detect when bbox stops growing
-        self.bbox_history = []              # Last N bbox sizes
-        self.bbox_stable_count = 0          # How many times bbox was stable
-        self.bbox_stable_threshold = 3      # Need 3 stable readings
-
+        # Pursuit safety/timeouts (ROS time)
+        self.lost_detection_timeout = float(os.environ.get("GO2_LOST_DETECTION_TIMEOUT", "2.0"))
+        self.abort_after_lost = float(os.environ.get("GO2_ABORT_AFTER_LOST", "8.0"))
+        
+        # Goal update gating (prevents thrashing)
+        self.goal_update_distance = float(os.environ.get("GO2_GOAL_UPDATE_DIST", "0.35"))  # meters
+        self.goal_update_yaw = math.radians(float(os.environ.get("GO2_GOAL_UPDATE_YAW_DEG", "6.0")))
+        
+        # Dynamic step sizing
+        self.max_step = float(os.environ.get("GO2_MAX_STEP", "2.0"))
+        self.min_step = float(os.environ.get("GO2_MIN_STEP", "0.25"))
+        self.yaw_only_threshold = float(os.environ.get("GO2_YAW_ONLY_OFFSET", "0.18"))  # normalized [-0.5..0.5]
+        self.center_tolerance = float(os.environ.get("GO2_CENTER_TOL", "0.08"))
+        
+        # Smoothing
+        self.bearing_ema_alpha = float(os.environ.get("GO2_BEARING_EMA_ALPHA", "0.25"))
+        self.bbox_ema_alpha = float(os.environ.get("GO2_BBOX_EMA_ALPHA", "0.25"))
+        
+        # Internal state
+        self._mode = "SEARCHING"
+        self._candidate_center: Optional[tuple[float, float]] = None  # (cx,cy)
+        self._candidate_hits = 0
+        self._locked_center: Optional[tuple[float, float]] = None     # (cx,cy) once pursuing
+        
+        self._last_meas: Optional[_DetMeas] = None
+        self._last_detection_time = 0.0   # ROS seconds
+        self._bearing_ema: Optional[float] = None
+        self._bbox_ema: Optional[float] = None
+        
+        self._current_goal: Optional[tuple[float, float, float]] = None  # (x,y,yaw)
+        self._goal_seq = 0                # ignore stale callbacks
+        self._goal_handle = None
+        _goal_in_flight = False
+        
+        self.pursuit_start_time: Optional[float] = None
+        self.last_goal_update_time = 0.0
+        
         topic = os.environ.get("GO2_DETECTION_TOPIC", "/go2/object_detections")
         self.get_logger().info(
-            "Watching %s (target label='%s', hits=%d, visual servoing enabled)"
-            % (topic, self.target_label or "any", self.required_hits)
+            f"Robust visual servoing enabled: {topic} (label='{self.target_label or 'any'}', hits={self.required_hits})"
         )
         self.det_sub = self.create_subscription(
             Detection2DArray, topic, self._detection_cb, 10
@@ -112,239 +151,309 @@ class ObjectPursuitNode(Node):
         )
         
         self._publish_mode("SEARCHING")
-        self.create_timer(1.0, self._log_status)
+        self.create_timer(0.25, self._pursuit_watchdog)
 
     # ------------------------------------------------------------------
+    # Helper methods
+    # ------------------------------------------------------------------
+    def _now_sec(self) -> float:
+        """Get current ROS time in seconds"""
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _set_exploration(self, enabled: bool) -> None:
+        """Enable/disable exploration"""
+        from std_msgs.msg import Bool
+        msg = Bool()
+        msg.data = enabled
+        self.exploration_pub.publish(msg)
+
+    def _cancel_nav_goal(self) -> None:
+        """Cancel current Nav2 goal"""
+        if self._goal_handle:
+            try:
+                self._goal_handle.cancel_goal_async()
+            except Exception:
+                pass
+        self._goal_handle = None
+
     def _publish_mode(self, mode: str) -> None:
         """Publish current mode for status GUI"""
+        self._mode = mode
         from std_msgs.msg import String
         msg = String()
         msg.data = mode
         self.mode_pub.publish(msg)
-    
-    def _log_status(self) -> None:
-        if self._goal_in_flight:
+
+    def _stop_frontier_process(self) -> None:
+        """Stop frontier explorer process"""
+        if not self.frontier_pid_file or not self.frontier_pid_file.exists():
             return
-        if self._detections_seen > 0:
-            self.get_logger().info(
-                "Waiting for %d/%d detection confirmations..."
-                % (self._detections_seen, self.required_hits)
-            )
-    
+        try:
+            pid_str = self.frontier_pid_file.read_text().strip()
+            pid = int(pid_str)
+            os.kill(pid, signal.SIGTERM)
+            self.get_logger().info(f"Stopped frontier process PID {pid}")
+            self.frontier_pid_file.unlink()
+        except Exception as exc:
+            self.get_logger().warning(f"Could not stop frontier: {exc}")
+
+    # ------------------------------------------------------------------
+    # Detection picking and locking
+    # ------------------------------------------------------------------
+    def _pick_detection(self, msg: Detection2DArray) -> Optional[_DetMeas]:
+        """Select best detection from array, with instance locking during pursuit"""
+        if not msg.detections:
+            return None
+
+        img_w, img_h = 640.0, 480.0
+        candidates: list[_DetMeas] = []
+        
+        for det in msg.detections:
+            best_score = -1.0
+            # best label match inside this detection
+            for res in det.results:
+                label = getattr(res.hypothesis, "class_id", "")
+                score = float(getattr(res.hypothesis, "score", 0.0))
+                if self.target_label and (not isinstance(label, str) or label.lower() != self.target_label):
+                    continue
+                if score < self.min_score:
+                    continue
+                best_score = max(best_score, score)
+
+            if best_score < 0.0:
+                continue
+
+            bbox = det.bbox
+            cx = float(bbox.center.position.x)
+            cy = float(bbox.center.position.y)
+            bbox_pct = max(float(bbox.size_x) / img_w, float(bbox.size_y) / img_h)
+            offset_norm = (cx - img_w / 2.0) / img_w  # [-0.5..0.5]
+            candidates.append(_DetMeas(cx=cx, cy=cy, offset_norm=offset_norm, bbox_pct=bbox_pct, score=best_score))
+
+        if not candidates:
+            return None
+
+        # During pursuing: stick to the locked instance (nearest center)
+        if self._mode == "PURSUING" and self._locked_center is not None:
+            lx, ly = self._locked_center
+            best = min(candidates, key=lambda m: (m.cx - lx) ** 2 + (m.cy - ly) ** 2)
+            if math.hypot(best.cx - lx, best.cy - ly) > self.lock_px_gate:
+                return None  # likely a different instance -> treat as lost
+            return best
+
+        # Not pursuing: take strongest (score, then bbox size)
+        return max(candidates, key=lambda m: (m.score, m.bbox_pct))
+
+    # ------------------------------------------------------------------
+    # Callbacks
+    # ------------------------------------------------------------------
     def _prompt_cb(self, msg) -> None:
         """Reset search when new prompt is entered"""
-        if self._goal_in_flight:
-            # Cancel current pursuit
-            if self._goal_handle:
-                self.get_logger().info("Cancelling current pursuit goal for new search...")
-                cancel_future = self._goal_handle.cancel_goal_async()
-                self._goal_in_flight = False
-        
-        # Reset detection counter and pursuit timer
-        self._detections_seen = 0
+        # Cancel current nav goal (if any)
+        self._cancel_nav_goal()
+
+        # Reset tracking
+        self._candidate_center = None
+        self._candidate_hits = 0
+        self._locked_center = None
+
+        self._last_meas = None
+        self._bearing_ema = None
+        self._bbox_ema = None
+        self._current_goal = None
+
         self.pursuit_start_time = None
-        self._publish_mode("SEARCHING")
-        
+        self._goal_seq += 1
+
         # Restart exploration
-        from std_msgs.msg import Bool
-        enable_msg = Bool()
-        enable_msg.data = True
-        self.exploration_pub.publish(enable_msg)
-        
+        self._set_exploration(True)
+        self._publish_mode("SEARCHING")
+
         self.get_logger().info(f"New search started with prompt: '{msg.data}' - exploration restarted")
 
     def _detection_cb(self, msg: Detection2DArray) -> None:
-        if not msg.detections:
+        """Handle incoming detections with robust tracking and visual servoing"""
+        if self._mode == "REACHED":
             return
-        
-        # Find matching detection and store its bounding box
-        matched_detection = None
-        if self.target_label:
-            for detection in msg.detections:
-                for result in detection.results:
-                    label = getattr(result.hypothesis, "class_id", "")
-                    if isinstance(label, str) and label.lower() == self.target_label:
-                        matched_detection = detection
-                        break
-                if matched_detection:
-                    break
-            if not matched_detection:
-                return
-        else:
-            # Take first detection if no specific label
-            matched_detection = msg.detections[0]
-        
-        # Get bbox info
-        bbox = matched_detection.bbox
-        bbox_width = bbox.size_x
-        bbox_height = bbox.size_y
-        
-        # Calculate bbox as percentage of frame
-        img_w, img_h = 640.0, 480.0
-        bbox_pct_w = bbox_width / img_w
-        bbox_pct_h = bbox_height / img_h
-        bbox_percentage = max(bbox_pct_w, bbox_pct_h)
-        
-        # Store bbox info (center position + image dimensions + percentage)
-        self._last_detection_bbox = (
-            bbox.center.position.x,
-            bbox.center.position.y,
-            640.0,  # image width
-            480.0,  # image height
-            bbox_percentage
-        )
-        
-        # Check if object is close enough (bbox is large AND enough time passed)
-        if self._goal_in_flight:
-            import time
-            time_pursuing = time.time() - self.pursuit_start_time if self.pursuit_start_time else 0
-            
-            # Track bbox history for stability check
-            self.bbox_history.append(bbox_percentage)
-            if len(self.bbox_history) > 5:
-                self.bbox_history.pop(0)  # Keep last 5
-            
-            # Check if bbox is stable (not growing much)
-            is_stable = False
-            if len(self.bbox_history) >= 3:
-                recent = self.bbox_history[-3:]
-                max_diff = max(recent) - min(recent)
-                is_stable = max_diff < 0.03  # Less than 3% variance = stable
-            
-            # Stop if: (reached 50% target) OR (at 40%+ and stable and enough time)
-            stop_condition_met = (
-                (bbox_percentage >= self.target_bbox_percentage) or
-                (bbox_percentage >= self.stable_bbox_percentage and is_stable)
-            ) and time_pursuing >= self.min_pursuit_time
-            
-            if stop_condition_met:
-                reason = "target 50%" if bbox_percentage >= 0.50 else "stable at 40%+"
-                self.get_logger().info(
-                    f"Object reached ({reason})! Bbox={bbox_percentage*100:.1f}% "
-                    f"(target={self.target_bbox_percentage*100:.0f}%), pursued for {time_pursuing:.1f}s"
-                )
-                # Cancel goal and mark as complete
-                if self._goal_handle:
-                    self._goal_handle.cancel_goal_async()
-                self._goal_in_flight = False
-                self.pursuit_start_time = None
-                self.bbox_history = []
-                self._publish_mode("PURSUIT")  # Search complete
-                self.destroy_node()
-                rclpy.shutdown()
-                return
-        
+
+        meas = self._pick_detection(msg)
+        if meas is None:
+            return
+
         # Ignore tiny detections (noise/far away)
-        if bbox_percentage < self.min_bbox_percentage:
+        if meas.bbox_pct < self.min_bbox_percentage:
             return
-        
-        # If not pursuing yet, count confirmations
-        if not self._goal_in_flight:
-            self._detections_seen += 1
+
+        now = self._now_sec()
+        self._last_detection_time = now
+        self._last_meas = meas
+
+        # If pursuing, keep lock center updated smoothly
+        if self._mode == "PURSUING" and self._locked_center is not None:
+            lx, ly = self._locked_center
+            self._locked_center = (0.7 * lx + 0.3 * meas.cx, 0.7 * ly + 0.3 * meas.cy)
+
+        # --- Reached condition (safer): big bbox + centered + min time
+        if self._mode == "PURSUING":
+            time_pursuing = (now - self.pursuit_start_time) if self.pursuit_start_time else 0.0
+            if (meas.bbox_pct >= self.target_bbox_percentage and
+                abs(meas.offset_norm) <= self.center_tolerance and
+                time_pursuing >= self.min_pursuit_time):
+                self.get_logger().info(
+                    f"Object reached: bbox={meas.bbox_pct*100:.1f}% "
+                    f"offset={meas.offset_norm:+.3f} pursued={time_pursuing:.1f}s"
+                )
+                self._cancel_nav_goal()
+                self.pursuit_start_time = None
+                self._publish_mode("REACHED")
+                self._set_exploration(False)
+                return
+
+        # --- Not pursuing yet: require consistent hits near same center
+        if self._mode != "PURSUING":
+            if self._candidate_center is None:
+                self._candidate_center = (meas.cx, meas.cy)
+                self._candidate_hits = 1
+            else:
+                cx0, cy0 = self._candidate_center
+                if math.hypot(meas.cx - cx0, meas.cy - cy0) <= self.candidate_px_gate:
+                    self._candidate_hits += 1
+                    self._candidate_center = (0.8 * cx0 + 0.2 * meas.cx, 0.8 * cy0 + 0.2 * meas.cy)
+                else:
+                    self._candidate_center = (meas.cx, meas.cy)
+                    self._candidate_hits = 1
+
             self.get_logger().info(
-                f"Detection {self._detections_seen}/{self.required_hits} - "
-                f"bbox @ ({bbox.center.position.x:.0f}, {bbox.center.position.y:.0f}) "
-                f"coverage={bbox_percentage*100:.1f}%"
+                f"Detection {self._candidate_hits}/{self.required_hits} "
+                f"bbox={meas.bbox_pct*100:.1f}% cx={meas.cx:.0f} cy={meas.cy:.0f}"
             )
-            if self._detections_seen >= self.required_hits:
+
+            if self._candidate_hits >= self.required_hits:
+                # lock on this instance
+                self._locked_center = self._candidate_center
                 self._begin_object_pursuit()
-        else:
-            # Already pursuing - update goal based on current detection
-            import time
-            now = time.time()
+            return
+
+        # --- Pursuing: update goal only at rate + significance
+        if self._mode == "PURSUING":
             if now - self.last_goal_update_time >= self.goal_update_rate:
                 self._update_pursuit_goal()
                 self.last_goal_update_time = now
 
+    # ------------------------------------------------------------------
+    # Pursuit logic
+    # ------------------------------------------------------------------
     def _calculate_goal_from_bbox(self):
-        """Calculate Nav2 goal position from current detection bbox"""
-        if not self._last_detection_bbox:
+        """Calculate Nav2 goal with rotate-first and dynamic step sizing"""
+        if not self._last_meas:
             return None
-        
-        # Get robot's current pose
+
+        # Get robot pose
         try:
             trans = self.tf_buffer.lookup_transform(
-                'map', 'unitree_go2/base_link', rclpy.time.Time()
+                self.map_frame, self.base_frame, rclpy.time.Time()
             )
             robot_x = trans.transform.translation.x
             robot_y = trans.transform.translation.y
-            
-            # Get robot's current yaw
+
             quat = trans.transform.rotation
             siny_cosp = 2.0 * (quat.w * quat.z + quat.x * quat.y)
             cosy_cosp = 1.0 - 2.0 * (quat.y * quat.y + quat.z * quat.z)
             robot_yaw = math.atan2(siny_cosp, cosy_cosp)
-            
         except Exception as e:
             self.get_logger().error(f"Could not get robot pose: {e}")
             return None
-        
-        # Calculate bearing to object from bbox
-        bbox_cx, _, img_w, _, bbox_size = self._last_detection_bbox
-        
-        # Horizontal offset from image center (normalized -0.5 to 0.5)
-        offset_normalized = (bbox_cx - img_w / 2.0) / img_w
-        
-        # Convert to angle using camera HFOV
-        bearing_offset = offset_normalized * math.radians(self.camera_hfov)
-        
-        # Object direction = robot yaw + bearing offset
-        object_direction = robot_yaw + bearing_offset
-        
-        # Goal position: approach_distance meters in direction of object
-        goal_x = robot_x + self.approach_distance * math.cos(object_direction)
-        goal_y = robot_y + self.approach_distance * math.sin(object_direction)
-        
-        return (goal_x, goal_y, object_direction, bbox_size)
+
+        meas = self._last_meas
+
+        # Smooth bbox pct and bearing
+        if self._bbox_ema is None:
+            self._bbox_ema = meas.bbox_pct
+        else:
+            a = self.bbox_ema_alpha
+            self._bbox_ema = (1.0 - a) * self._bbox_ema + a * meas.bbox_pct
+
+        bearing_offset = meas.offset_norm * math.radians(self.camera_hfov)  # [-hfov/2..hfov/2]
+        if self._bearing_ema is None:
+            self._bearing_ema = bearing_offset
+        else:
+            a = self.bearing_ema_alpha
+            self._bearing_ema = (1.0 - a) * self._bearing_ema + a * bearing_offset
+
+        object_direction = _wrap_angle(robot_yaw + self._bearing_ema)
+
+        # Dynamic step: smaller when bbox grows, and rotate-first when off-center
+        bbox = self._bbox_ema
+        if bbox >= self.target_bbox_percentage:
+            step = 0.0
+        else:
+            ratio = max(0.0, (self.target_bbox_percentage - bbox) / self.target_bbox_percentage)
+            step = self.min_step + ratio * (self.max_step - self.min_step)
+
+        # Rotate-first if object is far off-center
+        if abs(meas.offset_norm) > self.yaw_only_threshold:
+            step = 0.0
+        else:
+            # Reduce step when not centered (safer)
+            step *= max(0.25, 1.0 - abs(meas.offset_norm) / 0.5)
+
+        # Build goal
+        if step <= 1e-3:
+            goal_x, goal_y = robot_x, robot_y
+        else:
+            goal_x = robot_x + step * math.cos(object_direction)
+            goal_y = robot_y + step * math.sin(object_direction)
+
+        return (goal_x, goal_y, object_direction, bbox)
     
     def _begin_object_pursuit(self) -> None:
-        if self._goal_in_flight:
+        """Start visual servoing pursuit"""
+        if self._mode == "PURSUING":
             return
-        if not self._last_detection_bbox:
-            self.get_logger().error("No detection bbox stored!")
+        if not self._last_meas:
+            self.get_logger().error("No detection stored!")
             return
-            
-        self._goal_in_flight = True
-        self._publish_mode("PURSUING")  # Notify GUI
+
+        self._publish_mode("PURSUING")
+        self._set_exploration(False)
         self._stop_frontier_process()
-        
-        # Start pursuit timer
-        import time
-        self.pursuit_start_time = time.time()
-        
-        # Send initial goal
+
+        self.pursuit_start_time = self._now_sec()
+        self.last_goal_update_time = 0.0
+
+        # reset smoothing at pursuit start
+        self._bearing_ema = None
+        self._bbox_ema = None
+        self._current_goal = None
+
         self._send_pursuit_goal()
     
     def _send_pursuit_goal(self):
-        """Send/update Nav2 goal based on current detection"""
+        """Send/update Nav2 goal with gating to prevent thrashing"""
         goal_data = self._calculate_goal_from_bbox()
         if not goal_data:
-            self.get_logger().error("Failed to calculate goal from bbox")
-            self._goal_in_flight = False
             return
-        
-        goal_x, goal_y, object_direction, bbox_percentage = goal_data
-        
-        import time
-        time_pursuing = time.time() - self.pursuit_start_time if self.pursuit_start_time else 0
-        
-        self.get_logger().info(
-            f"Visual servoing: goal=({goal_x:.2f}, {goal_y:.2f}) "
-            f"bbox={bbox_percentage*100:.1f}% time={time_pursuing:.1f}s"
-        )
-        
+
+        goal_x, goal_y, yaw, bbox = goal_data
+
+        # Update gating: only if goal meaningfully changes
+        if self._current_goal is not None:
+            gx0, gy0, yaw0 = self._current_goal
+            if (math.hypot(goal_x - gx0, goal_y - gy0) < self.goal_update_distance and
+                abs(_wrap_angle(yaw - yaw0)) < self.goal_update_yaw):
+                return
+
         if not self.client.wait_for_server(timeout_sec=1.0):
             self.get_logger().error("Nav2 action server not available")
-            self._goal_in_flight = False
             return
 
         pose = PoseStamped()
-        pose.header.frame_id = "map"
+        pose.header.frame_id = self.map_frame
         pose.header.stamp = self.get_clock().now().to_msg()
-        pose.pose.position.x = goal_x
-        pose.pose.position.y = goal_y
+        pose.pose.position.x = float(goal_x)
+        pose.pose.position.y = float(goal_y)
         pose.pose.position.z = 0.0
-        qx, qy, qz, qw = _yaw_to_quaternion(object_direction)
+        qx, qy, qz, qw = _yaw_to_quaternion(yaw)
         pose.pose.orientation.x = qx
         pose.pose.orientation.y = qy
         pose.pose.orientation.z = qz
@@ -352,90 +461,103 @@ class ObjectPursuitNode(Node):
 
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = pose
-        
-        # Cancel old goal if exists
-        if self._goal_handle:
-            self._goal_handle.cancel_goal_async()
-        
+
+        self._goal_seq += 1
+        seq = self._goal_seq
+        self._current_goal = (goal_x, goal_y, yaw)
+
+        self.get_logger().info(
+            f"Pursuit goal: ({goal_x:.2f}, {goal_y:.2f}) yaw={math.degrees(yaw):.1f}° bbox={bbox*100:.1f}%"
+        )
+
         send_future = self.client.send_goal_async(goal_msg)
-        send_future.add_done_callback(self._goal_response_cb)
+        send_future.add_done_callback(lambda fut, seq=seq: self._goal_response_cb(fut, seq))
     
     def _update_pursuit_goal(self):
         """Update pursuit goal based on new detection (visual servoing)"""
         self._send_pursuit_goal()
 
-    def _goal_response_cb(self, future) -> None:
+    def _goal_response_cb(self, future, seq: int) -> None:
+        """Handle Nav2 goal acceptance"""
+        if seq != self._goal_seq or self._mode != "PURSUING":
+            return
         try:
             self._goal_handle = future.result()
-        except Exception as exc:  # pragma: no cover - future errors
+        except Exception as exc:
             self.get_logger().error(f"Failed to send goal: {exc}")
-            self._goal_in_flight = False
             return
         if not self._goal_handle.accepted:
             self.get_logger().warning("NavigateToPose goal rejected")
-            self._goal_in_flight = False
             return
-        self.get_logger().info("Object pursuit goal accepted; waiting for result...")
-        result_future = self._goal_handle.get_result_async()
-        result_future.add_done_callback(self._goal_result_cb)
 
-    def _goal_result_cb(self, future) -> None:
+        result_future = self._goal_handle.get_result_async()
+        result_future.add_done_callback(lambda fut, seq=seq: self._goal_result_cb(fut, seq))
+
+    def _goal_result_cb(self, future, seq: int) -> None:
+        """Handle Nav2 goal completion (don't shutdown - keep servoing)"""
+        if seq != self._goal_seq:
+            return
         try:
-            result = future.result()
-            status = getattr(result, "status", None)
-            self.get_logger().info(
-                f"Object pursuit finished (status={status}). Mission complete."
-            )
-        except Exception as exc:  # pragma: no cover - future errors
-            self.get_logger().error(f"Object pursuit failed: {exc}")
+            wrapped = future.result()
+            status = getattr(wrapped, "status", None)
+
+            if status == GoalStatus.STATUS_SUCCEEDED:
+                # Intermediate goal reached (normal for servoing)
+                self.get_logger().debug("Intermediate Nav2 goal reached.")
+            elif status == GoalStatus.STATUS_ABORTED:
+                self.get_logger().warning("Nav2 goal aborted (will continue pursuing if detections continue).")
+            elif status == GoalStatus.STATUS_CANCELED:
+                self.get_logger().debug("Nav2 goal canceled/preempted.")
+            else:
+                self.get_logger().info(f"Nav2 goal finished with status={status}.")
+        except Exception as exc:
+            self.get_logger().error(f"Nav2 goal result error: {exc}")
         finally:
-            self._goal_in_flight = False
-            self.destroy_node()
-            rclpy.shutdown()
+            # Keep node alive; pursuit continues via detections
+            self._goal_handle = None
 
     # ------------------------------------------------------------------
-    def _stop_frontier_process(self) -> None:
-        pid = self._read_frontier_pid()
-        if pid is None:
-            self.get_logger().warning("Frontier PID file missing; nothing to stop")
+    # Watchdog
+    # ------------------------------------------------------------------
+    def _pursuit_watchdog(self) -> None:
+        """Monitor for lost detections and abort pursuit if needed"""
+        if self._mode != "PURSUING":
             return
-        self.get_logger().info(f"Stopping frontier explorer process (pid={pid})")
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                os.kill(pid, sig)
-                break
-            except ProcessLookupError:
-                break
-            except PermissionError:
-                continue
-        if self.frontier_pid_file:
-            try:
-                if self.frontier_pid_file.exists():
-                    self.frontier_pid_file.unlink()
-            except Exception:
-                pass
+        if self._last_detection_time <= 0.0:
+            return
 
-    def _read_frontier_pid(self) -> Optional[int]:
-        if not self.frontier_pid_file or not self.frontier_pid_file.exists():
-            return None
-        try:
-            raw = self.frontier_pid_file.read_text().strip()
-            return int(raw)
-        except Exception:
-            return None
+        now = self._now_sec()
+        lost_for = now - self._last_detection_time
+
+        if lost_for > self.abort_after_lost:
+            self.get_logger().warning(f"Lost object for {lost_for:.1f}s -> abort pursuit, resume exploration.")
+            self._cancel_nav_goal()
+            self.pursuit_start_time = None
+
+            # reset tracking
+            self._candidate_center = None
+            self._candidate_hits = 0
+            self._locked_center = None
+            self._last_meas = None
+            self._bearing_ema = None
+            self._bbox_ema = None
+            self._current_goal = None
+
+            self._publish_mode("SEARCHING")
+            self._set_exploration(True)
 
 
-def main() -> None:
-    rclpy.init()
+def main(args=None):
+    rclpy.init(args=args)
     node = ObjectPursuitNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("Object pursuit interrupted")
+        pass
     finally:
-        if rclpy.ok():
-            rclpy.shutdown()
+        node.destroy_node()
+        rclpy.try_shutdown()
 
 
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     main()
