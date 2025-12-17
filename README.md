@@ -35,6 +35,22 @@ This will:
 
 **The robot will automatically explore, find green cubes, and navigate to them!** 🎯
 
+**Changing Search Target:** Use the Status GUI to enter a new prompt (e.g., "plant", "chair") and click "Update" to search for different objects. When the robot reaches a target, click "Start New Search" with a new prompt to begin a fresh exploration cycle.
+
+### Terminal 3 (Optional): Manual Nav2 Control
+
+For debugging or manual navigation without the autonomous agent:
+
+```bash
+./scripts/run_nav2_slam.sh
+```
+
+This launches **only** Nav2 + SLAM + SAM3 + RViz, without the frontier explorer. Useful for:
+- **Manual navigation**: Use RViz "2D Nav Goal" tool to send waypoints
+- **SLAM debugging**: Observe map building in real-time
+- **Detection testing**: Monitor `/go2/object_detections` topic
+- **Manual robot control**: Use WASD keys in Isaac Sim viewport
+
 ---
 
 ## 📖 I Want to Understand This Repo
@@ -209,7 +225,7 @@ ISAAC-EXP/
 
 ---
 
-## 🛠️ Setup (One-Time)
+## Setup (One-Time)
 
 ### Prerequisites
 - **Isaac Sim 5.1** (or Isaac Lab 0.47+)
@@ -250,7 +266,7 @@ python -c "import isaaclab; print('Isaac Lab OK')"
 
 ---
 
-## 🎮 Usage Examples
+## Usage Examples
 
 ### Standard Autonomous Mission
 ```bash
