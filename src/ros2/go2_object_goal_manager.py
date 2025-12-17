@@ -75,11 +75,17 @@ class ObjectPursuitNode(Node):
         
         # Camera parameters (Go2 front camera from sim)
         self.camera_hfov = 69.4  # degrees (horizontal field of view)
-        self.approach_distance = 2.0  # meters to approach object
+        self.approach_distance = 1.5  # meters to move per update
+        
+        # Visual servoing parameters
+        self.target_bbox_size = 150.0  # pixels (when to stop - object close enough)
+        self.min_bbox_size = 30.0      # pixels (ignore tiny detections)
+        self.goal_update_rate = 0.5    # seconds between goal updates
+        self.last_goal_update_time = 0.0
 
         topic = os.environ.get("GO2_DETECTION_TOPIC", "/go2/object_detections")
         self.get_logger().info(
-            "Watching %s (target label='%s', hits=%d)"
+            "Watching %s (target label='%s', hits=%d, visual servoing enabled)"
             % (topic, self.target_label or "any", self.required_hits)
         )
         self.det_sub = self.create_subscription(
@@ -131,8 +137,6 @@ class ObjectPursuitNode(Node):
         self.get_logger().info(f"New search started with prompt: '{msg.data}'")
 
     def _detection_cb(self, msg: Detection2DArray) -> None:
-        if self._goal_in_flight:
-            return
         if not msg.detections:
             return
         
@@ -153,35 +157,61 @@ class ObjectPursuitNode(Node):
             # Take first detection if no specific label
             matched_detection = msg.detections[0]
         
-        # Store bbox info (center position + image dimensions)
-        # Assume image is 640x480 (Go2 camera default)
+        # Get bbox info
         bbox = matched_detection.bbox
+        bbox_width = bbox.size_x
+        bbox_height = bbox.size_y
+        bbox_size = max(bbox_width, bbox_height)  # Use larger dimension
+        
+        # Store bbox info (center position + image dimensions + size)
         self._last_detection_bbox = (
             bbox.center.position.x,
             bbox.center.position.y,
             640.0,  # image width
-            480.0   # image height
+            480.0,  # image height
+            bbox_size
         )
         
-        self._detections_seen += 1
-        self.get_logger().info(
-            "Detection confirmation %d/%d (bbox center: %.1f, %.1f)"
-            % (self._detections_seen, self.required_hits, 
-               bbox.center.position.x, bbox.center.position.y)
-        )
-        if self._detections_seen >= self.required_hits:
-            self._begin_object_pursuit()
+        # Check if object is close enough (bbox is large)
+        if self._goal_in_flight and bbox_size >= self.target_bbox_size:
+            self.get_logger().info(
+                f"Object reached! Bbox size={bbox_size:.1f}px >= target={self.target_bbox_size}px"
+            )
+            # Cancel goal and mark as complete
+            if self._goal_handle:
+                self._goal_handle.cancel_goal_async()
+            self._goal_in_flight = False
+            self._publish_mode("PURSUIT")  # Search complete
+            self.destroy_node()
+            rclpy.shutdown()
+            return
+        
+        # Ignore tiny detections (noise/far away)
+        if bbox_size < self.min_bbox_size:
+            return
+        
+        # If not pursuing yet, count confirmations
+        if not self._goal_in_flight:
+            self._detections_seen += 1
+            self.get_logger().info(
+                f"Detection {self._detections_seen}/{self.required_hits} - "
+                f"bbox @ ({bbox.center.position.x:.0f}, {bbox.center.position.y:.0f}) "
+                f"size={bbox_size:.1f}px"
+            )
+            if self._detections_seen >= self.required_hits:
+                self._begin_object_pursuit()
+        else:
+            # Already pursuing - update goal based on current detection
+            import time
+            now = time.time()
+            if now - self.last_goal_update_time >= self.goal_update_rate:
+                self._update_pursuit_goal()
+                self.last_goal_update_time = now
 
-    def _begin_object_pursuit(self) -> None:
-        if self._goal_in_flight:
-            return
+    def _calculate_goal_from_bbox(self):
+        """Calculate Nav2 goal position from current detection bbox"""
         if not self._last_detection_bbox:
-            self.get_logger().error("No detection bbox stored!")
-            return
-            
-        self._goal_in_flight = True
-        self._publish_mode("PURSUING")  # Notify GUI
-        self._stop_frontier_process()
+            return None
         
         # Get robot's current pose
         try:
@@ -199,11 +229,10 @@ class ObjectPursuitNode(Node):
             
         except Exception as e:
             self.get_logger().error(f"Could not get robot pose: {e}")
-            self._goal_in_flight = False
-            return
+            return None
         
         # Calculate bearing to object from bbox
-        bbox_cx, _, img_w, _ = self._last_detection_bbox
+        bbox_cx, _, img_w, _, bbox_size = self._last_detection_bbox
         
         # Horizontal offset from image center (normalized -0.5 to 0.5)
         offset_normalized = (bbox_cx - img_w / 2.0) / img_w
@@ -218,14 +247,38 @@ class ObjectPursuitNode(Node):
         goal_x = robot_x + self.approach_distance * math.cos(object_direction)
         goal_y = robot_y + self.approach_distance * math.sin(object_direction)
         
+        return (goal_x, goal_y, object_direction, bbox_size)
+    
+    def _begin_object_pursuit(self) -> None:
+        if self._goal_in_flight:
+            return
+        if not self._last_detection_bbox:
+            self.get_logger().error("No detection bbox stored!")
+            return
+            
+        self._goal_in_flight = True
+        self._publish_mode("PURSUING")  # Notify GUI
+        self._stop_frontier_process()
+        
+        # Send initial goal
+        self._send_pursuit_goal()
+    
+    def _send_pursuit_goal(self):
+        """Send/update Nav2 goal based on current detection"""
+        goal_data = self._calculate_goal_from_bbox()
+        if not goal_data:
+            self.get_logger().error("Failed to calculate goal from bbox")
+            self._goal_in_flight = False
+            return
+        
+        goal_x, goal_y, object_direction, bbox_size = goal_data
+        
         self.get_logger().info(
-            "Navigating to object: robot=(%.2f, %.2f, yaw=%.2f°) → goal=(%.2f, %.2f) "
-            "bearing_offset=%.1f°"
-            % (robot_x, robot_y, math.degrees(robot_yaw),
-               goal_x, goal_y, math.degrees(bearing_offset))
+            f"Visual servoing: goal=({goal_x:.2f}, {goal_y:.2f}) "
+            f"bearing={math.degrees(object_direction - math.atan2(0,1)):.1f}° bbox_size={bbox_size:.1f}px"
         )
         
-        if not self.client.wait_for_server(timeout_sec=10.0):
+        if not self.client.wait_for_server(timeout_sec=1.0):
             self.get_logger().error("Nav2 action server not available")
             self._goal_in_flight = False
             return
@@ -244,8 +297,17 @@ class ObjectPursuitNode(Node):
 
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = pose
+        
+        # Cancel old goal if exists
+        if self._goal_handle:
+            self._goal_handle.cancel_goal_async()
+        
         send_future = self.client.send_goal_async(goal_msg)
         send_future.add_done_callback(self._goal_response_cb)
+    
+    def _update_pursuit_goal(self):
+        """Update pursuit goal based on new detection (visual servoing)"""
+        self._send_pursuit_goal()
 
     def _goal_response_cb(self, future) -> None:
         try:
