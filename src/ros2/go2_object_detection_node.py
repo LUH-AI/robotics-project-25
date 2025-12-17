@@ -358,16 +358,11 @@ class Go2GroundedSAM2Node(Node):
 
         arr.detections.append(det)
         self.detections_pub.publish(arr)
-        if detections:
-            label_counts = {}
-            for lbl in result.labels:
-                label_counts[lbl] = label_counts.get(lbl, 0) + 1
-            self.get_logger().info(
-                f"[{src_msg.header.stamp.sec}.{src_msg.header.stamp.nanosec:09d}] "
-                f"{detections} detections ({label_counts}), {result.latency_s*1000:.1f} ms"
-            )
-        else:
-            self.get_logger().debug("No detections in frame.")
+        
+        # Log selected detection
+        self.get_logger().info(
+            f"Published selected target: {label} (score={score:.2f})"
+        )
 
     def destroy_node(self) -> None:
         self._stop_evt.set()
