@@ -407,8 +407,15 @@ def run_simulator(cfg):
 
     if os.environ.get("GO2_ENABLE_DETECTION_CUBE", "1").lower() not in ("0", "false", "no"):
         try:
-            sim_env.spawn_detection_cube(cfg.num_envs)
-            print("[go2_sim] Detection test cube spawned in front of Go2 base.")
+            # Default to random spawning with 3-10m radius
+            if os.environ.get("GO2_DETECTION_CUBE_RANDOM", "1").lower() in ("1", "true", "yes"):
+                min_dist = float(os.environ.get("GO2_DETECTION_CUBE_RANDOM_MIN_DIST_M", "3"))
+                radius = float(os.environ.get("GO2_DETECTION_CUBE_RANDOM_RADIUS_M", "10"))
+                sim_env.spawn_detection_cube_random_near_go2(cfg.num_envs, radius_m=radius, min_dist_m=min_dist)
+                print(f"[go2_sim] Detection cube spawned randomly ({min_dist}-{radius}m from Go2).")
+            else:
+                sim_env.spawn_detection_cube(cfg.num_envs)
+                print("[go2_sim] Detection test cube spawned (fixed position).")
         except Exception as exc:
             print(f"[WARN] Failed to spawn detection cube: {exc}")
 

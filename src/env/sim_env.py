@@ -96,7 +96,6 @@ def spawn_detection_cube(
         cube.CreateSizeAttr(size * (1.0 / meters_per_unit))
         cube.GetDisplayColorAttr().Set([Gf.Vec3f(*color)])
         xform = UsdGeom.Xformable(cube.GetPrim())
-        xform.ClearXformOps()
         xform.AddTranslateOp().Set(pos_units)
         cube.GetDisplayOpacityAttr().Set([1.0])
 
