@@ -40,6 +40,10 @@ ensure_ros2() {
 
 cleanup() {
   local code=$?
+  if [[ -n ${STATUS_GUI_PID:-} ]] && kill -0 "$STATUS_GUI_PID" >/dev/null 2>&1; then
+    kill -TERM "$STATUS_GUI_PID" >/dev/null 2>&1 || true
+    wait "$STATUS_GUI_PID" 2>/dev/null || true
+  fi
   if [[ -n ${OBJECT_PURSUIT_PID:-} ]] && kill -0 "$OBJECT_PURSUIT_PID" >/dev/null 2>&1; then
     kill -TERM "$OBJECT_PURSUIT_PID" >/dev/null 2>&1 || true
     wait "$OBJECT_PURSUIT_PID" 2>/dev/null || true
@@ -121,7 +125,12 @@ python3 -m custom_explorer.explorer &
 FRONTIER_PID=$!
 printf '%s\n' "$FRONTIER_PID" > "$FRONTIER_PID_FILE"
 
-# 3) Start the detection-aware pursuit manager.
+# 3) Start the status GUI window
+echo "[start_agent] Starting status GUI window..."
+python3 "$ROOT_DIR/src/ros2/go2_status_gui.py" &
+STATUS_GUI_PID=$!
+
+# 4) Start the detection-aware pursuit manager.
 export GO2_FRONTIER_PID_FILE="$FRONTIER_PID_FILE"
 
 echo "[start_agent] Monitoring detections and switching to pursuit when needed..."

@@ -76,9 +76,22 @@ class ObjectPursuitNode(Node):
             Detection2DArray, topic, self._detection_cb, 10
         )
         self.client = ActionClient(self, NavigateToPose, "navigate_to_pose")
+        
+        # Publisher for status GUI
+        from std_msgs.msg import String
+        self.mode_pub = self.create_publisher(String, "/go2/agent_mode", 10)
+        self._publish_mode("SEARCHING")
+        
         self.create_timer(1.0, self._log_status)
 
     # ------------------------------------------------------------------
+    def _publish_mode(self, mode: str) -> None:
+        """Publish current mode for status GUI"""
+        from std_msgs.msg import String
+        msg = String()
+        msg.data = mode
+        self.mode_pub.publish(msg)
+    
     def _log_status(self) -> None:
         if self._goal_in_flight:
             return
@@ -117,6 +130,7 @@ class ObjectPursuitNode(Node):
         if self._goal_in_flight:
             return
         self._goal_in_flight = True
+        self._publish_mode("PURSUIT")  # Notify GUI
         self._stop_frontier_process()
         self.get_logger().info(
             "Sending NavigateToPose goal to (%.2f, %.2f, yaw=%.2f)"
