@@ -407,15 +407,41 @@ def run_simulator(cfg):
 
     if os.environ.get("GO2_ENABLE_DETECTION_CUBE", "1").lower() not in ("0", "false", "no"):
         try:
-            # Default to random spawning with 3-10m radius
-            if os.environ.get("GO2_DETECTION_CUBE_RANDOM", "1").lower() in ("1", "true", "yes"):
-                min_dist = float(os.environ.get("GO2_DETECTION_CUBE_RANDOM_MIN_DIST_M", "3"))
-                radius = float(os.environ.get("GO2_DETECTION_CUBE_RANDOM_RADIUS_M", "10"))
-                sim_env.spawn_detection_cube_random_near_go2(cfg.num_envs, radius_m=radius, min_dist_m=min_dist)
-                print(f"[go2_sim] Detection cube spawned randomly ({min_dist}-{radius}m from Go2).")
-            else:
-                sim_env.spawn_detection_cube(cfg.num_envs)
-                print("[go2_sim] Detection test cube spawned (fixed position).")
+            cube_mode = os.environ.get("GO2_CUBE_MODE", "HARD").upper()
+            
+            if cube_mode == "DEBUG":
+                # DEBUG: 1 cube 3m directly in front for testing
+                print("[go2_sim] DEBUG MODE: Spawning cube 3m in front of Go2...")
+                sim_env.spawn_detection_cube(cfg.num_envs, position_m=(3.0, 0.0, 1.5))
+                
+            elif cube_mode == "EASY":
+                # EASY: 1 cube 5m in front (fixed position, easy to find)
+                print("[go2_sim] EASY MODE: Spawning cube 5m in front of Go2...")
+                sim_env.spawn_detection_cube(cfg.num_envs, position_m=(5.0, 0.0, 1.5))
+                
+            elif cube_mode == "MEDIUM":
+                # MEDIUM: 10 cubes random within 15m radius
+                print("[go2_sim] MEDIUM MODE: Spawning 10 cubes randomly (15m radius)...")
+                for i in range(10):
+                    sim_env.spawn_detection_cube_random_near_go2(
+                        cfg.num_envs, 
+                        radius_m=15.0, 
+                        min_dist_m=3.0,
+                        size=0.55
+                    )
+                    if i == 0:  # Only print once
+                        print(f"[go2_sim] Spawned cube {i+1}/10")
+                        
+            else:  # HARD (default)
+                # HARD: 1 cube random position within 20m radius
+                print("[go2_sim] HARD MODE: Spawning 1 cube randomly (20m radius)...")
+                sim_env.spawn_detection_cube_random_near_go2(
+                    cfg.num_envs, 
+                    radius_m=20.0, 
+                    min_dist_m=5.0
+                )
+                
+            print(f"[go2_sim] Detection cube(s) spawned in {cube_mode} mode.")
         except Exception as exc:
             print(f"[WARN] Failed to spawn detection cube: {exc}")
 
