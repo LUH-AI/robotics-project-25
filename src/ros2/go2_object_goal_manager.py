@@ -78,12 +78,18 @@ class ObjectPursuitNode(Node):
         self.approach_distance = 2.0  # meters to move per update (increased for closer approach)
         
         # Visual servoing parameters
-        self.target_bbox_percentage = 0.25  # Stop when bbox is 25% of frame
+        self.target_bbox_percentage = 0.50  # Stop when bbox is 50% of frame (close!)
+        self.stable_bbox_percentage = 0.40  # Can stop at 40% if stable (not growing)
         self.min_bbox_percentage = 0.05     # Ignore detections < 5% of frame (noise)
         self.goal_update_rate = 0.5         # seconds between goal updates
         self.last_goal_update_time = 0.0
         self.pursuit_start_time = None      # Track when pursuit started
         self.min_pursuit_time = 5.0         # Minimum 5 seconds before can stop
+        
+        # Stability tracking - detect when bbox stops growing
+        self.bbox_history = []              # Last N bbox sizes
+        self.bbox_stable_count = 0          # How many times bbox was stable
+        self.bbox_stable_threshold = 3      # Need 3 stable readings
 
         topic = os.environ.get("GO2_DETECTION_TOPIC", "/go2/object_detections")
         self.get_logger().info(
