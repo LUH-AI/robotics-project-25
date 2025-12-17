@@ -412,12 +412,12 @@ def run_simulator(cfg):
             if cube_mode == "DEBUG":
                 # DEBUG: 1 cube 3m directly in front for testing
                 print("[go2_sim] DEBUG MODE: Spawning cube 3m in front of Go2...")
-                sim_env.spawn_detection_cube(cfg.num_envs, position_m=(3.0, 0.0, 1.5))
+                sim_env.spawn_detection_cube(cfg.num_envs, env_position_m=(3.0, 0.0, 1.5))
                 
             elif cube_mode == "EASY":
                 # EASY: 1 cube 5m in front (fixed position, easy to find)
                 print("[go2_sim] EASY MODE: Spawning cube 5m in front of Go2...")
-                sim_env.spawn_detection_cube(cfg.num_envs, position_m=(5.0, 0.0, 1.5))
+                sim_env.spawn_detection_cube(cfg.num_envs, env_position_m=(5.0, 0.0, 1.5))
                 
             elif cube_mode == "MEDIUM":
                 # MEDIUM: 10 cubes random within 15m radius
