@@ -76,6 +76,8 @@ class SensorManager:
             camera.initialize()
             camera.set_focal_length(1.5)
             # Keep near plane very small so close obstacles are visible in the RGB feed.
-            camera.set_clipping_range((0.01, 200.0))
+            # Keep near plane very small so close obstacles are visible in the RGB feed.
+            clipping_attr = camera.prim.GetAttribute("clippingRange")
+            clipping_attr.Set(Gf.Vec2f((0.01, 200.0)))
             cameras.append(camera)
         return cameras
