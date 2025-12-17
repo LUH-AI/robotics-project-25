@@ -241,8 +241,9 @@ class Go2GroundedSAM2Node(Node):
             det = Detection2D()
             det.header = src_msg.header
             bbox = BoundingBox2D()
-            bbox.center.x = float((box[0] + box[2]) * 0.5)
-            bbox.center.y = float((box[1] + box[3]) * 0.5)
+            # BoundingBox2D.center is a Pose2D (has position.x/position.y, not x/y directly)
+            bbox.center.position.x = float((box[0] + box[2]) * 0.5)
+            bbox.center.position.y = float((box[1] + box[3]) * 0.5)
             bbox.center.theta = 0.0
             bbox.size_x = float(max(0.0, box[2] - box[0]))
             bbox.size_y = float(max(0.0, box[3] - box[1]))
