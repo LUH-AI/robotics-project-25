@@ -127,6 +127,38 @@ fi
 # Default GO2_HEADLESS to 0 unless already set by the user/environment.
 export GO2_HEADLESS="${GO2_HEADLESS:-0}"
 
+# --- Detection Cube Mode Selection ---
+if [[ -z "${GO2_CUBE_MODE:-}" ]]; then
+  echo "--------------------------------------------------"
+  echo "Select Detection Cube Mode:"
+  echo "  1) EASY   - 1 Cube 5m in front"
+  echo "  2) MEDIUM - 10 Cubes random (15m radius)"
+  echo "  3) HARD   - 1 Cube random (20m radius) [Default]"
+  echo "  --------------------------------------------------"
+  read -p "Enter choice [1-3]: " choice
+
+  case "$choice" in
+    1)
+      export GO2_CUBE_MODE="EASY"
+      echo "-> EASY MODE selected."
+      ;;
+    2)
+      export GO2_CUBE_MODE="MEDIUM"
+      echo "-> MEDIUM MODE selected."
+      ;;
+    3)
+      export GO2_CUBE_MODE="HARD"
+      echo "-> HARD MODE selected."
+      ;;
+    *)
+      export GO2_CUBE_MODE="HARD"
+      echo "-> Defaulting to HARD MODE."
+      ;;
+  esac
+  echo "--------------------------------------------------"
+fi
+
+
 echo "[go2_sim] Starting Isaac Sim (env: $ISAAC_ENV, headless=$GO2_HEADLESS)"
 cd "$SRC_DIR"
 exec python isaac_go2_ros2.py "$@"
