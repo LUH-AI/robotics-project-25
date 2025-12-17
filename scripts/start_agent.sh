@@ -85,9 +85,10 @@ echo "[start_agent] Launching Nav2 + SLAM pipeline..."
 "$ROOT_DIR/scripts/run_nav2_slam.sh" &
 NAV2_STACK_PID=$!
 
-# Give Nav2/SLAM time to fully initialize
-echo "[start_agent] Waiting for Nav2/SLAM to initialize..."
-sleep 10
+# Give Nav2/SLAM/RViz/SAM3 time to fully initialize
+echo "[start_agent] Waiting for RViz and SAM3 model to load..."
+sleep 25
+
 
 
 # 2) Start the cloned frontier explorer package.
