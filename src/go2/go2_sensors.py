@@ -63,11 +63,11 @@ class SensorManager:
     def add_camera(self, freq):
         cameras = []
         for env_idx in range(self.num_envs):
+            prim_path = f"/World/envs/env_{env_idx}/Go2/base/radar/front_cam"
             camera = Camera(
-                prim_path=f"/World/envs/env_{env_idx}/Go2/base/front_cam",
-                # Mount at the same position as the front radar/LiDAR pod so the
-                # RGB feed matches what Nav2 "sees".
-                translation=np.array([0.2, 0.0, 0.2]),
+                prim_path=prim_path,
+                # Attach directly to the radar housing so the transform matches exactly.
+                translation=np.array([0.0, 0.0, 0.0]),
                 frequency=freq,
                 resolution=(640, 480),
                 orientation=rot_utils.euler_angles_to_quats(np.array([0, 0, 0]), degrees=True),
