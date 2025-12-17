@@ -85,9 +85,17 @@ echo "[start_agent] Launching Nav2 + SLAM pipeline..."
 "$ROOT_DIR/scripts/run_nav2_slam.sh" &
 NAV2_STACK_PID=$!
 
-# Give Nav2/SLAM/RViz/SAM3 time to fully initialize
-echo "[start_agent] Waiting for RViz and SAM3 model to load..."
-sleep 25
+# Wait for RViz to start (check for rviz2 process)
+echo "[start_agent] Waiting for RViz to launch..."
+for _ in $(seq 1 60); do
+  if pgrep -f "rviz2" > /dev/null 2>&1; then
+    echo "[start_agent] RViz started! Waiting 5s for UI to stabilize..."
+    sleep 5
+    break
+  fi
+  sleep 1
+done
+
 
 
 
