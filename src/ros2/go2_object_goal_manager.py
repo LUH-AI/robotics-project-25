@@ -80,8 +80,13 @@ class ObjectPursuitNode(Node):
         # Publisher for status GUI
         from std_msgs.msg import String
         self.mode_pub = self.create_publisher(String, "/go2/agent_mode", 10)
-        self._publish_mode("SEARCHING")
         
+        # Subscribe to prompt changes to reset search
+        self.prompt_sub = self.create_subscription(
+            String, "/go2/object_detection/prompt", self._prompt_cb, 10
+        )
+        
+        self._publish_mode("SEARCHING")
         self.create_timer(1.0, self._log_status)
 
     # ------------------------------------------------------------------
@@ -100,6 +105,20 @@ class ObjectPursuitNode(Node):
                 "Waiting for %d/%d detection confirmations..."
                 % (self._detections_seen, self.required_hits)
             )
+    
+    def _prompt_cb(self, msg) -> None:
+        """Reset search when new prompt is entered"""
+        if self._goal_in_flight:
+            # Cancel current pursuit
+            if self._goal_handle:
+                self.get_logger().info("Cancelling current pursuit goal for new search...")
+                cancel_future = self._goal_handle.cancel_goal_async()
+                self._goal_in_flight = False
+        
+        # Reset detection counter
+        self._detections_seen = 0
+        self._publish_mode("SEARCHING")
+        self.get_logger().info(f"New search started with prompt: '{msg.data}'")
 
     def _detection_cb(self, msg: Detection2DArray) -> None:
         if self._goal_in_flight:
