@@ -70,7 +70,8 @@ class SensorManager:
                 translation=np.array([0.0, 0.0, 0.0]),
                 frequency=freq,
                 resolution=(640, 480),
-                orientation=rot_utils.euler_angles_to_quats(np.array([0, 0, 0]), degrees=True),
+                # Face the same direction as the radar (180° yaw relative to base X-forward).
+                orientation=rot_utils.euler_angles_to_quats(np.array([0, 0, 180]), degrees=True),
             )
             camera.initialize()
             camera.set_focal_length(1.5)
