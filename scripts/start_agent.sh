@@ -85,23 +85,10 @@ echo "[start_agent] Launching Nav2 + SLAM pipeline..."
 "$ROOT_DIR/scripts/run_nav2_slam.sh" &
 NAV2_STACK_PID=$!
 
-# Give Nav2/SLAM a few seconds to start up
+# Give Nav2/SLAM time to fully initialize
 echo "[start_agent] Waiting for Nav2/SLAM to initialize..."
-sleep 5
+sleep 10
 
-echo "[start_agent] Waiting for Nav2 action server..."
-nav2_ready=0
-for _ in $(seq 1 60); do
-  if ros2 action list 2>/dev/null | grep -q "^/navigate_to_pose$"; then
-    nav2_ready=1
-    break
-  fi
-  sleep 1
-done
-if [[ "$nav2_ready" -ne 1 ]]; then
-  echo "[start_agent] ERROR: Nav2 action server not available." >&2
-  exit 1
-fi
 
 # 2) Start the cloned frontier explorer package.
 EXPLORER_ROOT="$ROOT_DIR/exploration_algorithm/Autonomous-Explorer-and-Mapper-ros2-nav2"
