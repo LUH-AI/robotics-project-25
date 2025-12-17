@@ -39,6 +39,16 @@ class Go2StatusGUI(Node):
             10
         )
         
+        # Publisher for SAM3 prompt updates
+        self.prompt_pub = self.create_publisher(
+            String,
+            '/go2/object_detection/prompt',
+            10
+        )
+        
+        # Track current prompt
+        self.current_prompt = "green cube."
+        
         self.get_logger().info("Go2 Status GUI initialized")
         
         # Update GUI every 100ms
@@ -57,6 +67,15 @@ class Go2StatusGUI(Node):
         """Handle mode changes from the agent"""
         self.current_mode = msg.data.upper()
         self.get_logger().info(f"Mode changed to: {self.current_mode}")
+    
+    def update_prompt(self, new_prompt):
+        """Publish new prompt to SAM3 detector"""
+        if new_prompt and new_prompt.strip():
+            msg = String()
+            msg.data = new_prompt.strip()
+            self.prompt_pub.publish(msg)
+            self.current_prompt = new_prompt.strip()
+            self.get_logger().info(f"Updated detection prompt to: '{self.current_prompt}'")
     
     def update_gui(self):
         """Update the GUI with current status"""
@@ -101,7 +120,7 @@ if __name__ == '__main__':
     # Create GUI window
     root = tk.Tk()
     root.title("Go2 Agent Status")
-    root.geometry("500x250")
+    root.geometry("500x320")
     root.configure(bg='#1a1a1a')
     
     # Make window always on top
@@ -128,6 +147,49 @@ if __name__ == '__main__':
         pady=20
     )
     detail_label.pack(fill=tk.BOTH, expand=True)
+    
+    # Create prompt editor section
+    prompt_frame = tk.Frame(root, bg='#1a1a1a', pady=10)
+    prompt_frame.pack(fill=tk.X, padx=20)
+    
+    prompt_label = tk.Label(
+        prompt_frame,
+        text="SAM3 Search Prompt:",
+        font=("Arial", 10),
+        fg="white",
+        bg="#1a1a1a"
+    )
+    prompt_label.pack(side=tk.LEFT, padx=(0, 10))
+    
+    prompt_entry = tk.Entry(
+        prompt_frame,
+        font=("Arial", 12),
+        bg="#2a2a2a",
+        fg="white",
+        insertbackground="white",
+        width=25
+    )
+    prompt_entry.insert(0, "green cube.")
+    prompt_entry.pack(side=tk.LEFT, padx=(0, 10), ipady=5)
+    
+    def on_update_prompt():
+        new_prompt = prompt_entry.get()
+        gui_node.update_prompt(new_prompt)
+    
+    update_button = tk.Button(
+        prompt_frame,
+        text="Update",
+        font=("Arial", 10, "bold"),
+        bg="#0066CC",
+        fg="white",
+        activebackground="#0088EE",
+        activeforeground="white",
+        command=on_update_prompt,
+        padx=15,
+        pady=5
+    )
+    update_button.pack(side=tk.LEFT)
+
     
     # Create ROS2 node
     gui_node = Go2StatusGUI(root)
