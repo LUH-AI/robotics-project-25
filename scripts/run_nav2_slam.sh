@@ -68,6 +68,17 @@ echo "[go2_nav2] Using dummy map: $MAP_FILE"
 
 cleanup() {
   rm -f "$PID_FILE" 2>/dev/null || true
+  if [[ -n "${IMAGE_VIEW_PID-}" ]] && kill -0 "$IMAGE_VIEW_PID" 2>/dev/null; then
+    kill -TERM "$IMAGE_VIEW_PID" 2>/dev/null || true
+  fi
+  if [[ -n "${RVIZ_PID-}" ]] && kill -0 "$RVIZ_PID" 2>/dev/null; then
+    kill -TERM "$RVIZ_PID" 2>/dev/null || true
+  fi
+  if [[ -n "${DETECTION_PID-}" ]] && kill -0 "$DETECTION_PID" 2>/dev/null; then
+    pgid="$(ps -o pgid= -p "$DETECTION_PID" 2>/dev/null | tr -d ' ' || true)"
+    [[ -n "${pgid:-}" ]] && kill -TERM -- "-$pgid" 2>/dev/null || true
+    kill -TERM "$DETECTION_PID" 2>/dev/null || true
+  fi
   if [[ -n "${NAV2_PID-}" ]] && kill -0 "$NAV2_PID" 2>/dev/null; then
     # Kill the whole process group (ros2 launch + all children). PID != PGID on older runs.
     pgid="$(ps -o pgid= -p "$NAV2_PID" 2>/dev/null | tr -d ' ' || true)"
@@ -117,6 +128,48 @@ else
   USE_SIM_TIME_STR="False"
 fi
 
+start_detection() {
+  if [[ "${GO2_SKIP_OBJECT_DETECTION:-0}" == "1" ]]; then
+    echo "[go2_nav2] Skipping object detection (GO2_SKIP_OBJECT_DETECTION=1)"
+    return
+  fi
+
+  local prompt="${GO2_DETECTION_PROMPT:-green cube.}"
+  local image_topic="${GO2_DETECTION_IMAGE_TOPIC:-/unitree_go2/front_cam/color_image}"
+  local detection_cmd=(
+    "$ROOT_DIR/scripts/run_object_detection.sh"
+    --prompt-text "$prompt"
+    --image-topic "$image_topic"
+  )
+
+  # Auto-wire local SAM3 checkpoint if available (allows running without gated HF access).
+  if [[ "${GO2_DETECTION_ARGS:-}" != *"--sam3-checkpoint"* ]]; then
+    local sam3_ckpt="${GO2_SAM3_CHECKPOINT:-$ROOT_DIR/object-detection/sam3_modelscope/sam3.pt}"
+    if [[ -f "$sam3_ckpt" ]]; then
+      detection_cmd+=(--sam3-checkpoint "$sam3_ckpt")
+    fi
+  fi
+
+  if [[ "${GO2_DETECTION_ENABLE_MASKS:-1}" == "1" ]]; then
+    detection_cmd+=(--enable-masks)
+  fi
+  if [[ -n "${GO2_DETECTION_DEVICE:-}" ]]; then
+    detection_cmd+=(--device "${GO2_DETECTION_DEVICE}")
+  fi
+  local EXTRA_ARGS=()
+  if [[ -n "${GO2_DETECTION_ARGS:-}" ]]; then
+    # shellcheck disable=SC2206
+    EXTRA_ARGS=(${GO2_DETECTION_ARGS})
+    detection_cmd+=("${EXTRA_ARGS[@]}")
+  fi
+
+  echo "[go2_nav2] Starting object detector (prompt='${prompt}')..."
+  setsid "${detection_cmd[@]}" &
+  DETECTION_PID=$!
+}
+
+start_detection
+
 echo "[go2_nav2] Starting base_footprint TF (base_link -> base_footprint)..."
 setsid python3 "$ROOT_DIR/scripts/base_footprint_tf.py" \
   --odom-frame odom \
@@ -151,6 +204,7 @@ FOOTPRINT_TF_PID=$FOOTPRINT_TF_PID
 PC2LS_PID=$PC2LS_PID
 SCAN_RELAY_PID=$SCAN_RELAY_PID
 NAV2_PID=$NAV2_PID
+DETECTION_PID=${DETECTION_PID:-}
 EOF
 
 echo "[go2_nav2] Waiting for /scan and /map to appear..."
@@ -190,6 +244,20 @@ if [[ "${GO2_NO_RVIZ-0}" != "1" ]] && [[ -n "${DISPLAY-}" ]]; then
   ) &
   RVIZ_PID=$!
   echo "[go2_nav2] RViz PID: $RVIZ_PID (Ctrl-C here will stop Nav2+SLAM)"
+
+  # Optional convenience: open the annotated camera stream in a dedicated window.
+  # RViz's Image display renders inside the main render panel; rqt_image_view gives a
+  # straightforward "camera feed" window with overlays.
+  if [[ "${GO2_NO_IMAGE_VIEW-0}" != "1" ]]; then
+    if ros2 pkg prefix rqt_image_view >/dev/null 2>&1; then
+      echo "[go2_nav2] Launching rqt_image_view (/go2/object_detections/image)..."
+      ( set +e; ros2 run rqt_image_view rqt_image_view /go2/object_detections/image ) &
+      IMAGE_VIEW_PID=$!
+    else
+      echo "[go2_nav2] NOTE: rqt_image_view not installed; skipping camera window." >&2
+    fi
+  fi
+
   wait "$NAV2_PID"
 else
   echo "[go2_nav2] Nav2+SLAM is running. Open RViz in another terminal if desired:"

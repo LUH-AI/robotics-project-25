@@ -88,9 +88,34 @@ Running Nav2 with sim time enabled can break TF/message filters unless the bridg
 
 - Headless simulator: `GO2_HEADLESS=1 ./scripts/run_go2.sh`
 - Disable RViz: `GO2_NO_RVIZ=1 ./scripts/run_nav2_slam.sh`
+- Disable the camera overlay window: `GO2_NO_IMAGE_VIEW=1 ./scripts/run_nav2_slam.sh`
 - Force software OpenGL for RViz (remote desktops): `GO2_RVIZ_SOFTWARE=1 ./scripts/run_nav2_slam.sh`
 - Opt into sim time (only if your bridge publishes sim time correctly): `GO2_USE_SIM_TIME=1 ./scripts/run_nav2_slam.sh`
 
+## Object detection (SAM3 realtime + Go2 camera)
+
+- `./scripts/run_nav2_slam.sh` now auto-starts the detector with default arguments (prompt `green cube.` on `/unitree_go2/front_cam/color_image`). Disable this with `GO2_SKIP_OBJECT_DETECTION=1 ./scripts/run_nav2_slam.sh`.
+- The simulator spawns a bright green cube in the environment by default to make testing easy (toggle with `GO2_ENABLE_DETECTION_CUBE=0`). Default pose can be overridden with `GO2_DETECTION_CUBE_POS="x,y,z"` (meters, env frame). The detector prompt defaults to `green cube.` so you immediately see a bounding box/mask in RViz.
+- Detector node: `./scripts/run_object_detection.sh --prompt-text "person."` (runs in the ROS 2 env you use for Nav2) – useful if you want to launch it manually outside the Nav2 script.
+- Topics:
+  - Camera: `/unitree_go2/front_cam/color_image` (default subscriber)
+  - Detections: `/go2/object_detections` (`vision_msgs/Detection2DArray`)
+  - Annotated view: `/go2/object_detections/image` (added to `nav2/go2_nav2*.rviz` as “Go2 Detection Image”, and also opened via `rqt_image_view` by default)
+  - Prompt updates: set param `prompt_text` or publish `std_msgs/String` to `/go2/object_detection/prompt`
+- Install SAM3 realtime fork once per machine (run inside your ROS 2 env, e.g. `ros2_humble`): `pip install -e object-detection/sam3-realtime`.
+- Checkpoint note: HuggingFace `facebook/sam3` is gated for many users. If you can’t download via HF, fetch weights via ModelScope and point the detector at `sam3.pt`:
+  - `pip install modelscope`
+  - `modelscope download --model facebook/sam3 --local_dir object-detection/sam3_modelscope`
+  - `GO2_DETECTION_ARGS="--sam3-checkpoint $(pwd)/object-detection/sam3_modelscope/sam3.pt" ./scripts/run_nav2_slam.sh`
+- Optional: keep the previous Grounded-SAM-2 pipeline by passing `GO2_DETECTION_ARGS="--backend grounded_sam2 --enable-masks"` (requires checkpoints via `object-detection/Grounded-SAM-2/checkpoints/download_ckpts.sh`).
+- Runtime knobs (export before running Nav2):
+  - `GO2_DETECTION_PROMPT="forklift."`
+  - `GO2_DETECTION_IMAGE_TOPIC=/unitree_go2/front_cam/color_image`
+  - `GO2_DETECTION_DEVICE=cuda` (or `cpu`)
+  - `GO2_DETECTION_ARGS="--backend grounded_sam2 --enable-masks"` to fall back to the previous detector
+  - `GO2_DETECTION_ARGS="--sam3-checkpoint /models/sam3_large.pt"` to point to a local checkpoint
+  - `GO2_DETECTION_ARGS="--max-hz 1.0"` for any extra CLI flags
+ 
 ## Quick sanity checks
 
 In a ROS 2 terminal (the same one you use for Nav2), after the simulator is up:
