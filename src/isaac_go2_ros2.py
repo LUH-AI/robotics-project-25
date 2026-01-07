@@ -451,7 +451,7 @@ def run_simulator(cfg):
     cameras = sm.add_camera(cfg.freq)
 
     # Keyboard control (GUI only).
-    if (not IS_HEADLESS) and os.environ.get("GO2_ENABLE_KEYBOARD", "1").lower() not in ("0", "false", "no"):
+    if (not IS_HEADLESS) and os.environ.get("GO2_ENABLE_KEYBOARD", "0").lower() not in ("0", "false", "no"):
         try:
             system_input = carb.input.acquire_input_interface()
             app_window = omni.appwindow.get_default_app_window()
