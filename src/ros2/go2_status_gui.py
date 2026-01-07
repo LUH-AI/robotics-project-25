@@ -99,7 +99,7 @@ class Go2StatusGUI(Node):
     def update_gui(self):
         """Update the GUI with current status"""
         # Determine display text and color
-        if self.current_mode == "PURSUIT":
+        if self.current_mode == "REACHED":
             status_text = "✓ SEARCH COMPLETE!"
             bg_color = "#00AA00"  # Green
             detail_text = f"Target found and reached!\nReady for new search"
@@ -204,8 +204,8 @@ if __name__ == '__main__':
         new_prompt = prompt_entry.get()
         gui_node.update_prompt(new_prompt)
         
-        # If this is "Start New Search" (mode is PURSUIT), auto-enable exploration
-        if gui_node.current_mode == "PURSUIT":
+        # If this is "Start New Search" (mode is REACHED), auto-enable exploration
+        if gui_node.current_mode == "REACHED":
             exploration_var.set(True)
             gui_node.toggle_exploration(True)
     
