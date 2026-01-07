@@ -3,7 +3,7 @@ defaults:
 
 num_envs: 1
 freq: 40 # can only be divisible by 200
-camera_follow: True
+camera_follow: False
 # Default environment: office with multiple rooms
 env_name: office
 # Examples: obstacle-[sparse|medium|dense], warehouse, warehouse-forklifts, hospital, office, grid
