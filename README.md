@@ -24,6 +24,13 @@ Wait for: **"Simulation App Startup Complete"**
 
 ```bash
 ./scripts/start_agent.sh
+
+# With logging file
+./scripts/start_agent.sh > run.log 2>&1
+
+
+# Both
+./scripts/start_agent.sh 2>&1 | tee run.log
 ```
 
 This will:
@@ -36,6 +43,12 @@ This will:
 **The robot will automatically explore, find green cubes, and navigate to them!** 🎯
 
 **Changing Search Target:** Use the Status GUI to enter a new prompt (e.g., "plant", "chair") and click "Update" to search for different objects. When the robot reaches a target, click "Start New Search" with a new prompt to begin a fresh exploration cycle.
+
+
+#### Terminate Nav2:
+```bash
+./scripts/stop_nav2_slam.sh 
+```
 
 ### Terminal 3 (Optional): Manual Nav2 Control
 
