@@ -78,6 +78,9 @@ class ObjectPursuitNode(Node):
         self.target_label = os.environ.get("GO2_OBJECT_LABEL", "").strip().lower()
         pid_file = os.environ.get("GO2_FRONTIER_PID_FILE", "").strip()
         self.frontier_pid_file = Path(pid_file) if pid_file else None
+        self.stop_frontier_on_pursuit = os.environ.get("GO2_STOP_FRONTIER_ON_PURSUIT", "0").lower() in (
+            "1", "true", "yes"
+        )
         
         # Camera parameters (Go2 front camera from sim)
         self.camera_hfov = 69.4  # degrees (horizontal field of view)
@@ -432,7 +435,8 @@ class ObjectPursuitNode(Node):
 
         self._publish_mode("PURSUING")
         self._set_exploration(False)
-        self._stop_frontier_process()
+        if self.stop_frontier_on_pursuit:
+            self._stop_frontier_process()
 
         self.pursuit_start_time = self._now_sec()
         self.last_goal_update_time = 0.0
