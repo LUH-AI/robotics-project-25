@@ -381,7 +381,7 @@ def run_simulator(cfg):
     go2_env_cfg.sim.render_interval = go2_env_cfg.decimation
     go2_ctrl.init_base_vel_cmd(cfg.num_envs)
     # env, policy = go2_ctrl.get_rsl_flat_policy(go2_env_cfg)
-    env, policy = go2_ctrl.get_rsl_rough_policy(go2_env_cfg)
+    env, policy = go2_ctrl.get_rsl_flat_policy(go2_env_cfg)
 
     # Simulation environment
     if (cfg.env_name == "obstacle-dense"):

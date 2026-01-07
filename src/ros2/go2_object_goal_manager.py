@@ -71,7 +71,7 @@ class ObjectPursuitNode(Node):
         
         # Frames (configurable)
         self.map_frame = os.environ.get("GO2_MAP_FRAME", "map").strip()
-        self.base_frame = os.environ.get("GO2_BASE_FRAME", "unitree_go2/base_link").strip()
+        self.base_frame = os.environ.get("GO2_BASE_FRAME", "unitree_go2/base_footprint").strip() # Ch
         
         # Target configuration
         self.required_hits = int(os.environ.get("GO2_DETECTIONS_REQUIRED", "3"))
@@ -91,21 +91,23 @@ class ObjectPursuitNode(Node):
         self.target_bbox_percentage = 0.50  # Stop when bbox is 50% of frame (close!)
         self.stable_bbox_percentage = 0.40  # Can stop at 40% if stable (not growing)
         self.min_bbox_percentage = 0.05     # Ignore detections < 5% of frame (noise)
-        self.goal_update_rate = 0.5         # seconds between goal updates
+        self.goal_update_rate = float(os.environ.get("GO2_GOAL_UPDATE_RATE", "1.5")) # define GO2_GOAL_UPDATE_RATE please
         self.min_pursuit_time = 5.0         # Minimum 5 seconds before can stop
         
         # Pursuit safety/timeouts (ROS time)
-        self.lost_detection_timeout = float(os.environ.get("GO2_LOST_DETECTION_TIMEOUT", "2.0"))
-        self.abort_after_lost = float(os.environ.get("GO2_ABORT_AFTER_LOST", "8.0"))
+        self.lost_detection_timeout = float(os.environ.get("GO2_LOST_DETECTION_TIMEOUT", "4.0"))
+        self.abort_after_lost = float(os.environ.get("GO2_ABORT_AFTER_LOST", "20.0"))
         
         # Goal update gating (prevents thrashing)
-        self.goal_update_distance = float(os.environ.get("GO2_GOAL_UPDATE_DIST", "0.35"))  # meters
-        self.goal_update_yaw = math.radians(float(os.environ.get("GO2_GOAL_UPDATE_YAW_DEG", "6.0")))
+        self.goal_update_distance = float(os.environ.get("GO2_GOAL_UPDATE_DIST", "0.6"))  # meters
+        self.goal_update_yaw = math.radians(float(os.environ.get("GO2_GOAL_UPDATE_YAW_DEG", "10.0")))
+        self.goal_hold_distance = float(os.environ.get("GO2_GOAL_HOLD_DIST", "0.9"))
+        self.goal_hold_timeout = float(os.environ.get("GO2_GOAL_HOLD_TIMEOUT", "4.0"))
         
         # Dynamic step sizing
-        self.max_step = float(os.environ.get("GO2_MAX_STEP", "2.0"))
-        self.min_step = float(os.environ.get("GO2_MIN_STEP", "0.25"))
-        self.yaw_only_threshold = float(os.environ.get("GO2_YAW_ONLY_OFFSET", "0.18"))  # normalized [-0.5..0.5]
+        self.max_step = float(os.environ.get("GO2_MAX_STEP", "2.5"))
+        self.min_step = float(os.environ.get("GO2_MIN_STEP", "0.4"))
+        self.yaw_only_threshold = float(os.environ.get("GO2_YAW_ONLY_OFFSET", "0.35"))  # normalized [-0.5..0.5]
         self.center_tolerance = float(os.environ.get("GO2_CENTER_TOL", "0.08"))
         
         # Smoothing
@@ -127,6 +129,7 @@ class ObjectPursuitNode(Node):
         self._goal_seq = 0                # ignore stale callbacks
         self._goal_handle = None
         _goal_in_flight = False
+        self._last_goal_sent_time = 0.0
         
         self.pursuit_start_time: Optional[float] = None
         self.last_goal_update_time = 0.0
@@ -175,6 +178,17 @@ class ObjectPursuitNode(Node):
             except Exception:
                 pass
         self._goal_handle = None
+
+    def _mark_reached(self, reason: str) -> None:
+        '''
+        End if reach
+        '''
+
+        self.get_logger().info(f"Object reached ({reason}). Stopping pursuit.")
+        self._cancel_nav_goal()
+        self.pursuit_start_time = None
+        self._publish_mode("REACHED")
+        self._set_exploration(False)
 
     def _publish_mode(self, mode: str) -> None:
         """Publish current mode for status GUI"""
@@ -303,10 +317,7 @@ class ObjectPursuitNode(Node):
                     f"Object reached: bbox={meas.bbox_pct*100:.1f}% "
                     f"offset={meas.offset_norm:+.3f} pursued={time_pursuing:.1f}s"
                 )
-                self._cancel_nav_goal()
-                self.pursuit_start_time = None
-                self._publish_mode("REACHED")
-                self._set_exploration(False)
+                self._mark_reached("vision")
                 return
 
         # --- Not pursuing yet: require consistent hits near same center
@@ -382,7 +393,8 @@ class ObjectPursuitNode(Node):
 
         object_direction = _wrap_angle(robot_yaw + self._bearing_ema)
 
-        # Dynamic step: smaller when bbox grows, and rotate-first when off-center
+        # Dynamic step: smaller when bbox grows.
+        # 07.01 dont rotate
         bbox = self._bbox_ema
         if bbox >= self.target_bbox_percentage:
             step = 0.0
@@ -390,12 +402,16 @@ class ObjectPursuitNode(Node):
             ratio = max(0.0, (self.target_bbox_percentage - bbox) / self.target_bbox_percentage)
             step = self.min_step + ratio * (self.max_step - self.min_step)
 
-        # Rotate-first if object is far off-center
+        # If object is off-center, reduce step but keep small forward
         if abs(meas.offset_norm) > self.yaw_only_threshold:
-            step = 0.0
+            step = max(step * 0.3, self.min_step * 0.25)
         else:
             # Reduce step when not centered (safer)
             step *= max(0.25, 1.0 - abs(meas.offset_norm) / 0.5)
+
+        # If the target is still small in view, bias toward a larger step
+        if self._bbox_ema is not None and self._bbox_ema < (self.stable_bbox_percentage * 0.5):
+            step = max(step, self.min_step * 1.5)
 
         # Build goal
         if step <= 1e-3:
@@ -404,7 +420,7 @@ class ObjectPursuitNode(Node):
             goal_x = robot_x + step * math.cos(object_direction)
             goal_y = robot_y + step * math.sin(object_direction)
 
-        return (goal_x, goal_y, object_direction, bbox)
+        return (goal_x, goal_y, object_direction, bbox, robot_x, robot_y, robot_yaw)
     
     def _begin_object_pursuit(self) -> None:
         """Start visual servoing pursuit"""
@@ -434,13 +450,21 @@ class ObjectPursuitNode(Node):
         if not goal_data:
             return
 
-        goal_x, goal_y, yaw, bbox = goal_data
+        goal_x, goal_y, object_yaw, bbox, robot_x, robot_y, robot_yaw = goal_data
+        now = self._now_sec()
+        goal_yaw = object_yaw
+        if bbox < self.stable_bbox_percentage:
+            # Avoid rotate in place when the target is still far (does it make sense to rotate?)
+            goal_yaw = robot_yaw
 
         # Update gating: only if goal meaningfully changes
         if self._current_goal is not None:
             gx0, gy0, yaw0 = self._current_goal
             if (math.hypot(goal_x - gx0, goal_y - gy0) < self.goal_update_distance and
-                abs(_wrap_angle(yaw - yaw0)) < self.goal_update_yaw):
+                abs(_wrap_angle(goal_yaw - yaw0)) < self.goal_update_yaw):
+                return
+            dist_to_goal = math.hypot(gx0 - robot_x, gy0 - robot_y)
+            if dist_to_goal > self.goal_hold_distance and (now - self._last_goal_sent_time) < self.goal_hold_timeout:
                 return
 
         if not self.client.wait_for_server(timeout_sec=1.0):
@@ -453,7 +477,7 @@ class ObjectPursuitNode(Node):
         pose.pose.position.x = float(goal_x)
         pose.pose.position.y = float(goal_y)
         pose.pose.position.z = 0.0
-        qx, qy, qz, qw = _yaw_to_quaternion(yaw)
+        qx, qy, qz, qw = _yaw_to_quaternion(goal_yaw)
         pose.pose.orientation.x = qx
         pose.pose.orientation.y = qy
         pose.pose.orientation.z = qz
@@ -464,10 +488,11 @@ class ObjectPursuitNode(Node):
 
         self._goal_seq += 1
         seq = self._goal_seq
-        self._current_goal = (goal_x, goal_y, yaw)
+        self._current_goal = (goal_x, goal_y, goal_yaw)
+        self._last_goal_sent_time = now
 
         self.get_logger().info(
-            f"Pursuit goal: ({goal_x:.2f}, {goal_y:.2f}) yaw={math.degrees(yaw):.1f}° bbox={bbox*100:.1f}%"
+            f"Pursuit goal: ({goal_x:.2f}, {goal_y:.2f}) yaw={math.degrees(goal_yaw):.1f}° bbox={bbox*100:.1f}%"
         )
 
         send_future = self.client.send_goal_async(goal_msg)
@@ -502,8 +527,16 @@ class ObjectPursuitNode(Node):
             status = getattr(wrapped, "status", None)
 
             if status == GoalStatus.STATUS_SUCCEEDED:
-                # Intermediate goal reached (normal for servoing)
-                self.get_logger().debug("Intermediate Nav2 goal reached.")
+                if self._mode == "PURSUING":
+                    if self._last_meas and self._last_meas.bbox_pct >= self.stable_bbox_percentage:
+                        self._mark_reached("nav2_goal_succeeded")
+                    else:
+                        self.get_logger().debug(
+                            "Nav2 goal reached but target still small; continuing pursuit."
+                        )
+                else:
+                    # Intermediate goal reached (normal for servoing)
+                    self.get_logger().debug("Intermediate Nav2 goal reached.")
             elif status == GoalStatus.STATUS_ABORTED:
                 self.get_logger().warning("Nav2 goal aborted (will continue pursuing if detections continue).")
             elif status == GoalStatus.STATUS_CANCELED:
