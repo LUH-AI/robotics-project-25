@@ -24,6 +24,8 @@ class RGBToDepthNode(Node):
         )
         self.depth_pub = self.create_publisher(Image, "depth_image", 10)
 
+        print("RGB to Depth Node has been started.")
+
     def rgb_callback(self, msg):
         try:
             # Convert ROS Image message to OpenCV image
