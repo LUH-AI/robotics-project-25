@@ -291,6 +291,7 @@ class ObjectPursuitNode(Node):
     def _detection_cb(self, msg: Detection2DArray) -> None:
         """Handle incoming detections with robust tracking and visual servoing"""
         if self._mode == "REACHED":
+            print("GOAL REACHED. DONE.")
             return
 
         meas = self._pick_detection(msg)
@@ -433,6 +434,7 @@ class ObjectPursuitNode(Node):
             self.get_logger().error("No detection stored!")
             return
 
+        print("ENTERING PURSUIT MODE")
         self._publish_mode("PURSUING")
         self._set_exploration(False)
         if self.stop_frontier_on_pursuit:

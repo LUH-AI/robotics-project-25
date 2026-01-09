@@ -1,0 +1,14 @@
+[project]
+name = "depth_estimation_node"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "==3.11.6"
+dependencies = [
+    "numpy<2.0",
+    "torch",
+    "timm==0.9.12",
+    "opencv-python",
+    "matplotlib",
+    "requests",
+]

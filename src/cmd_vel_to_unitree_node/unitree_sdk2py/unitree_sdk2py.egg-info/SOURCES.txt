@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+setup.py
+unitree_sdk2py.egg-info/PKG-INFO
+unitree_sdk2py.egg-info/SOURCES.txt
+unitree_sdk2py.egg-info/dependency_links.txt
+unitree_sdk2py.egg-info/requires.txt
+unitree_sdk2py.egg-info/top_level.txt

@@ -71,16 +71,17 @@ def main():
 
     start_time = time.time()
 
-    webcam = cv2.VideoCapture(4)
+    img_path = "./test-image.jpg"  # Path to a test image
+    img = cv2.imread(img_path)
+    # webcam = cv2.VideoCapture(0)
     while True:
-        ret, img = webcam.read()
-        if not ret:
-            print("Failed to grab frame")
-            break
-
+        # ret, img = webcam.read()
+        # if not ret:
+        #     print("Failed to grab frame")
+        #     break
         # Convert the image to RGB
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
+        
         # Perform depth estimation
         depth_map = model.estimate(img_rgb)
 
@@ -97,14 +98,14 @@ def main():
 
         # Exit the loop when 'q' is pressed
         if cv2.waitKey(1) & 0xFF == ord("q"):
+            print("Exiting...")
             break
 
     # Release the webcam and close all OpenCV windows
-    webcam.release()
+    # webcam.release()
     cv2.destroyAllWindows()
 
     print(f"Time taken: {time.time() - start_time:.2f} seconds")
-
 
 if __name__ == "__main__":
     main()

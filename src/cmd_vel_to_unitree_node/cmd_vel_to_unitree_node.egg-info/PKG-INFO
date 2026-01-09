@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: cmd-vel-to-unitree-node
+Version: 0.1.0
+Summary: Add your description here
+Author: UnitreeRobotics
+Author-email: unitree@unitree.com
+Requires-Python: ~=3.10.4
+Description-Content-Type: text/markdown
+Requires-Dist: numpy
+Requires-Dist: cyclonedds==0.10.2
+Dynamic: author
+Dynamic: author-email
