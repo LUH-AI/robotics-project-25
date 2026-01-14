@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "cmd-vel-to-unitree-node"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "~=3.10.4"
+dependencies = [
+    "numpy<2.0",
+    "cyclonedds==0.10.2",
+    "torch",
+    "timm==0.9.12",
+    "opencv-python",
+    "matplotlib",
+    "requests",
+]
