@@ -16,6 +16,8 @@ import time
 
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import PoseStamped, Twist, TransformStamped
+from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
+from sensor_msgs.msg import PointCloud2 as PointClous2D
 
 
 class CmdVelToUnitree(Node):
@@ -29,12 +31,17 @@ class CmdVelToUnitree(Node):
 
 
         self.tf_broadcaster = TransformBroadcaster(self)
-
+        self.creat_static_transform()
         self.odom_sub = self.create_subscription(
             Odometry, "/utlidar/robot_odom", self.odom_callback, 10
         )
         self.odom_pub = self.create_publisher(
-            Odometry, "/unitree_go2/odom", 10
+            Odometry, "/odom", 10
+        )
+
+        self.cloud_sub = self.create_subscription(PointClous2D, "/utlidar/cloud_deskewed", self.cloud_callback, 10)
+        self.cloud_pub = self.create_publisher(
+            PointClous2D, "/unitree_go2/lidar/point_cloud", 10
         )
 
         # Initialize SportsClient for Unitree Go2
@@ -58,40 +65,55 @@ class CmdVelToUnitree(Node):
         # print("stop")
         # self.obstacle_avoid_client.Move(0.0, 0, 0)
 
+    def cloud_callback(self, msg: PointClous2D):
+        # forward to /unitree_go2/lidar/point_cloud
+        msg.header.frame_id = "unitree_go2/lidar_frame"
+        # msg.header.frame_id = "map"
+
+        msg.header.stamp = self.get_clock().now().to_msg()
+        self.cloud_pub.publish(msg)
+
     def odom_callback(self, msg: Odometry):
         # forward to /unitree_go2/odom
+        msg.header.frame_id = "odom"
+        msg.header.stamp = self.get_clock().now().to_msg()
         self.odom_pub.publish(msg)
         
-        self.get_logger().info("publishing tf")
+        # self.get_logger().info("publishing tf")
         map_base_trans = TransformStamped()
         map_base_trans.header.stamp = self.get_clock().now().to_msg()
-        map_base_trans.header.frame_id = "/unitree_go2/odom"
+        map_base_trans.header.frame_id = "odom"
         map_base_trans.child_frame_id = "unitree_go2/base_link"
-
-
-        map_base_trans.transform.translation.x = 0.0
-        map_base_trans.transform.translation.y = 0.0
-        map_base_trans.transform.translation.z = 0.0
-        map_base_trans.transform.rotation = msg.pose.pose.orientation
-        # .x = 0.0
-        # map_base_trans.transform.rotation.y = 0.0
-        # map_base_trans.transform.rotation.z = 0.0
-        # map_base_trans.transform.rotation.w = 0.0
-        self.tf_broadcaster.sendTransform(map_base_trans)
-
-        map_base_trans = TransformStamped()
-        map_base_trans.header.stamp = self.get_clock().now().to_msg()
-        map_base_trans.header.frame_id = "/unitree_go2/odom"
-        map_base_trans.child_frame_id = "unitree_go2/base_footprint"
         
-        map_base_trans.transform.translation.x = 0.0
-        map_base_trans.transform.translation.y = 0.0
-        map_base_trans.transform.translation.z = 0.0
-        map_base_trans.transform.rotation = msg.pose.pose.orientation #.x = 0.0
+        map_base_trans.transform.translation.x = msg.pose.pose.position.x 
+        map_base_trans.transform.translation.y = msg.pose.pose.position.y
+        map_base_trans.transform.translation.z = msg.pose.pose.position.z
+        # map_base_trans.transform.translation.x = 0.0
+        # map_base_trans.transform.translation.y = 0.0
+        # map_base_trans.transform.translation.z = 0.0
+
+
+        map_base_trans.transform.rotation = msg.pose.pose.orientation
+        # map_base_trans.transform.rotation.x = 0.0
         # map_base_trans.transform.rotation.y = 0.0
         # map_base_trans.transform.rotation.z = 0.0
-        # map_base_trans.transform.rotation.w = 0.0
+        # map_base_trans.transform.rotation.w = 1.0
+
         self.tf_broadcaster.sendTransform(map_base_trans)
+
+        # map_base_trans = TransformStamped()
+        # map_base_trans.header.stamp = self.get_clock().now().to_msg()
+        # map_base_trans.header.frame_id = "/odom"
+        # map_base_trans.child_frame_id = "unitree_go2/base_footprint"
+    
+        # map_base_trans.transform.translation.x = 0.0
+        # map_base_trans.transform.translation.y = 0.0
+        # map_base_trans.transform.translation.z = 0.0
+        # map_base_trans.transform.rotation = msg.pose.pose.orientation #.x = 0.0
+        # # map_base_trans.transform.rotation.y = 0.0
+        # # map_base_trans.transform.rotation.z = 0.0
+        # # map_base_trans.transform.rotation.w = 0.0
+        # self.tf_broadcaster.sendTransform(map_base_trans)
 
         
 
@@ -113,6 +135,53 @@ class CmdVelToUnitree(Node):
         except Exception as e:
             self.get_logger().error(f"Error processing cmd_vel: {e}")
 
+
+    def creat_static_transform(self):
+        zero_stamp = rclpy.time.Time().to_msg()
+
+        lidar_broadcaster = StaticTransformBroadcaster(self)
+        base_lidar_transform = TransformStamped()
+        base_lidar_transform.header.stamp = zero_stamp
+        base_lidar_transform.header.frame_id = "unitree_go2/base_link"
+        base_lidar_transform.child_frame_id = "unitree_go2/lidar_frame"
+
+
+        # Translation
+        base_lidar_transform.transform.translation.x = 0.2
+        base_lidar_transform.transform.translation.y = 0.0
+        base_lidar_transform.transform.translation.z = 0.2
+        
+        # Rotation 
+        base_lidar_transform.transform.rotation.x = 0.0
+        base_lidar_transform.transform.rotation.y = 0.0
+        base_lidar_transform.transform.rotation.z = 0.0
+        base_lidar_transform.transform.rotation.w = 1.0
+        
+        # Publish the transform
+        lidar_broadcaster.sendTransform(base_lidar_transform)
+
+        # -------------------------------------------------------------
+        # Camera
+        # Create and publish the transform
+        camera_broadcaster = StaticTransformBroadcaster(self)
+        base_cam_transform = TransformStamped()
+        base_cam_transform.header.stamp = zero_stamp
+        base_cam_transform.header.frame_id = "unitree_go2/base_link"
+        base_cam_transform.child_frame_id = "unitree_go2/front_cam"
+
+        # Translation
+        base_cam_transform.transform.translation.x = 0.4
+        base_cam_transform.transform.translation.y = 0.0
+        base_cam_transform.transform.translation.z = 0.2
+        
+        # Rotation 
+        base_cam_transform.transform.rotation.x = -0.5
+        base_cam_transform.transform.rotation.y = 0.5
+        base_cam_transform.transform.rotation.z = -0.5
+        base_cam_transform.transform.rotation.w = 0.5
+        
+        # Publish the transform
+        camera_broadcaster.sendTransform(base_cam_transform)
 
 def main(args=None):
 
