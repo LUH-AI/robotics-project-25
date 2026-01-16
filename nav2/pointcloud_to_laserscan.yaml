@@ -3,15 +3,20 @@ pointcloud_to_laserscan:
     use_sim_time: True
     # Use the lidar frame so height filtering is relative to the sensor plane.
     # The PointCloud2 is already published in this frame.
+    
+    # !! NOTE: This has to be commented out, when testing in real life. 
+    # todo: Make seperate config files for sim and real world tests. 
     target_frame: unitree_go2/lidar_frame
+    
     transform_tolerance: 0.2
     # Keep points near the lidar plane; drop ground/ceiling returns.
-    min_height: -0.5
-    max_height: 0.5
+    min_height: 0.15
+    max_height: 0.75
     angle_min: -3.14159
     angle_max: 3.14159
     angle_increment: 0.0087   # ~0.5 deg
     scan_time: 0.1
+    queue_size: 100
     range_min: 0.1
     range_max: 30.0
     use_inf: True

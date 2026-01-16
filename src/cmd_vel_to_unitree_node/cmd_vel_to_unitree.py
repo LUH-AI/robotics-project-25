@@ -17,7 +17,7 @@ import time
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import PoseStamped, Twist, TransformStamped
 from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
-from sensor_msgs.msg import PointCloud2 as PointClous2D
+from sensor_msgs.msg import PointCloud2
 
 
 class CmdVelToUnitree(Node):
@@ -36,12 +36,18 @@ class CmdVelToUnitree(Node):
             Odometry, "/utlidar/robot_odom", self.odom_callback, 10
         )
         self.odom_pub = self.create_publisher(
-            Odometry, "/odom", 10
+            Odometry, "/unitree_go2/odom", 10
+        )
+        self.pose_pub = self.create_publisher(
+            PoseStamped, "/unitree_go2/pose", 10
+        )
+        self.pose2_pub = self.create_publisher(
+            PoseStamped, "/pose", 10
         )
 
-        self.cloud_sub = self.create_subscription(PointClous2D, "/utlidar/cloud_deskewed", self.cloud_callback, 10)
+        self.cloud_sub = self.create_subscription(PointCloud2, "/utlidar/cloud_deskewed", self.cloud_callback, 10)
         self.cloud_pub = self.create_publisher(
-            PointClous2D, "/unitree_go2/lidar/point_cloud", 10
+            PointCloud2, "/unitree_go2/lidar/point_cloud", 10
         )
 
         # Initialize SportsClient for Unitree Go2
@@ -65,17 +71,21 @@ class CmdVelToUnitree(Node):
         # print("stop")
         # self.obstacle_avoid_client.Move(0.0, 0, 0)
 
-    def cloud_callback(self, msg: PointClous2D):
+    def cloud_callback(self, msg: PointCloud2):
         # forward to /unitree_go2/lidar/point_cloud
-        msg.header.frame_id = "unitree_go2/lidar_frame"
-        # msg.header.frame_id = "map"
+        # is in odom frame. So don't just rewrite frame id
+        msg.header.frame_id = "odom"
+        # msg.header.frame_id = "unitree_go2/lidar_frame"
 
-        msg.header.stamp = self.get_clock().now().to_msg()
+        
+        past_time = self.get_clock().now() - rclpy.duration.Duration(seconds=0.05)
+        msg.header.stamp = past_time.to_msg()
         self.cloud_pub.publish(msg)
 
     def odom_callback(self, msg: Odometry):
         # forward to /unitree_go2/odom
         msg.header.frame_id = "odom"
+        msg.child_frame_id = "unitree_go2/base_link"
         msg.header.stamp = self.get_clock().now().to_msg()
         self.odom_pub.publish(msg)
         
@@ -88,16 +98,7 @@ class CmdVelToUnitree(Node):
         map_base_trans.transform.translation.x = msg.pose.pose.position.x 
         map_base_trans.transform.translation.y = msg.pose.pose.position.y
         map_base_trans.transform.translation.z = msg.pose.pose.position.z
-        # map_base_trans.transform.translation.x = 0.0
-        # map_base_trans.transform.translation.y = 0.0
-        # map_base_trans.transform.translation.z = 0.0
-
-
         map_base_trans.transform.rotation = msg.pose.pose.orientation
-        # map_base_trans.transform.rotation.x = 0.0
-        # map_base_trans.transform.rotation.y = 0.0
-        # map_base_trans.transform.rotation.z = 0.0
-        # map_base_trans.transform.rotation.w = 1.0
 
         self.tf_broadcaster.sendTransform(map_base_trans)
 
@@ -115,6 +116,13 @@ class CmdVelToUnitree(Node):
         # # map_base_trans.transform.rotation.w = 0.0
         # self.tf_broadcaster.sendTransform(map_base_trans)
 
+        # Also publish PoseStamped to /unitree_go2/pose
+        pose_msg = PoseStamped()
+        pose_msg.header = msg.header
+        pose_msg.pose = msg.pose.pose
+        # self.get_logger().info(f"POSE: {msg.pose.pose}")
+        self.pose_pub.publish(pose_msg)
+        self.pose2_pub.publish(pose_msg)
         
 
 
@@ -124,11 +132,6 @@ class CmdVelToUnitree(Node):
             linear_x = msg.linear.x
             linear_y = msg.linear.y
             angular_z = msg.angular.z
-
-            # Log the received velocities
-            self.get_logger().info(
-                f"Received cmd_vel: linear_x={linear_x}, linear_y={linear_y}, angular_z={angular_z}"
-            )
 
             # Send velocity commands to Unitree Go2 robot
             self.obstacle_avoid_client.Move(linear_x, linear_y, angular_z)
@@ -179,12 +182,13 @@ class CmdVelToUnitree(Node):
         base_cam_transform.transform.rotation.y = 0.5
         base_cam_transform.transform.rotation.z = -0.5
         base_cam_transform.transform.rotation.w = 0.5
-        
+
         # Publish the transform
         camera_broadcaster.sendTransform(base_cam_transform)
 
 def main(args=None):
 
+    print("Initializing Channel Factory...")
     if len(sys.argv) > 1:
         ChannelFactoryInitialize(0, sys.argv[1])
     else:
