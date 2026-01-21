@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set +u
 
 # One-shot launcher for Go2 Nav2 + SLAM.
 # - Starts pointcloud_to_laserscan (PointCloud2 -> /scan)
@@ -9,8 +10,17 @@ set -euo pipefail
 # Disable auto-RViz by setting GO2_NO_RVIZ=1.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PARAMS_FILE="$ROOT_DIR/nav2/nav2_slam_params.yaml"
-PC2LS_PARAMS="$ROOT_DIR/nav2/pointcloud_to_laserscan.yaml"
+
+
+# Change between sim and deploy
+if [[ -z "${RL_DEPLOY}" ]]; then
+  PC2LS_PARAMS="$ROOT_DIR/nav2/pointcloud_to_laserscan.yaml"
+  PARAMS_FILE="$ROOT_DIR/nav2/nav2_slam_params.yaml"
+else
+  PC2LS_PARAMS="$ROOT_DIR/nav2/pointcloud_to_laserscan_deploy.yaml"
+  PARAMS_FILE="$ROOT_DIR/nav2/nav2_slam_params_deploy.yaml"
+fi
+
 MAP_FILE="$ROOT_DIR/nav2/empty_map.yaml"
 STATE_DIR="${ROS_HOME:-$HOME/.ros}/go2_nav2_slam"
 PID_FILE="$STATE_DIR/pids"

@@ -1,5 +1,6 @@
 import rclpy
 import sys
+import os
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
@@ -23,6 +24,12 @@ from sensor_msgs.msg import PointCloud2
 class CmdVelToUnitree(Node):
     def __init__(self):
         super().__init__("cmd_vel_to_unitree")
+        # ADDED AT 20.01 tofix lidar frame handling
+        self.lidar_frame = os.getenv("GO2_LIDAR_FRAME", "unitree_go2/lidar_frame").strip() or "unitree_go2/lidar_frame"
+        self.force_cloud_frame = os.getenv("GO2_FORCE_CLOUD_FRAME", "0") == "1"
+        self.force_cloud_stamp = os.getenv("GO2_FORCE_CLOUD_STAMP", "0") == "1"
+        self.cloud_stamp_max_age = float(os.getenv("GO2_CLOUD_STAMP_MAX_AGE", "2.0"))
+        self._last_stamp_warn = 0.0
 
         # ROS 2 Subscriber to cmd_vel
         self.cmd_vel_sub = self.create_subscription(
@@ -41,9 +48,9 @@ class CmdVelToUnitree(Node):
         self.pose_pub = self.create_publisher(
             PoseStamped, "/unitree_go2/pose", 10
         )
-        self.pose2_pub = self.create_publisher(
-            PoseStamped, "/pose", 10
-        )
+        # self.pose2_pub = self.create_publisher(
+        #     PoseStamped, "/pose", 10
+        # )
 
         self.cloud_sub = self.create_subscription(PointCloud2, "/utlidar/cloud_deskewed", self.cloud_callback, 10)
         self.cloud_pub = self.create_publisher(
@@ -73,13 +80,23 @@ class CmdVelToUnitree(Node):
 
     def cloud_callback(self, msg: PointCloud2):
         # forward to /unitree_go2/lidar/point_cloud
-        # is in odom frame. So don't just rewrite frame id
-        msg.header.frame_id = "odom"
-        # msg.header.frame_id = "unitree_go2/lidar_frame"
-
-        
-        past_time = self.get_clock().now() - rclpy.duration.Duration(seconds=0.05)
-        msg.header.stamp = past_time.to_msg()
+        # ADDED AT 20.01 tofix lidar frame handling
+        if self.force_cloud_frame or not msg.header.frame_id:
+            msg.header.frame_id = self.lidar_frame
+        now = self.get_clock().now()
+        if msg.header.stamp.sec == 0 and msg.header.stamp.nanosec == 0:
+            msg.header.stamp = now.to_msg()
+        else:
+            stamp = rclpy.time.Time.from_msg(msg.header.stamp)
+            age = abs(now.nanoseconds - stamp.nanoseconds) * 1e-9
+            if self.force_cloud_stamp or age > self.cloud_stamp_max_age:
+                msg.header.stamp = now.to_msg()
+                warn_now = time.time()
+                if warn_now - self._last_stamp_warn > 2.0:
+                    self._last_stamp_warn = warn_now
+                    # self.get_logger().warning(
+                    #     f"PointCloud2 stamp was out of sync by {age:.2f}s; overriding to wall time."
+                    # )
         self.cloud_pub.publish(msg)
 
     def odom_callback(self, msg: Odometry):
@@ -87,6 +104,7 @@ class CmdVelToUnitree(Node):
         msg.header.frame_id = "odom"
         msg.child_frame_id = "unitree_go2/base_link"
         msg.header.stamp = self.get_clock().now().to_msg()
+        # self.get_logger().info(f"ODOM: {msg.twist.twist.linear}")
         self.odom_pub.publish(msg)
         
         # self.get_logger().info("publishing tf")
@@ -122,18 +140,19 @@ class CmdVelToUnitree(Node):
         pose_msg.pose = msg.pose.pose
         # self.get_logger().info(f"POSE: {msg.pose.pose}")
         self.pose_pub.publish(pose_msg)
-        self.pose2_pub.publish(pose_msg)
+        # self.pose2_pub.publish(pose_msg)
         
 
 
     def cmd_vel_callback(self, msg):
         try:
             # Extract linear and angular velocity from Twist message
-            linear_x = msg.linear.x
-            linear_y = msg.linear.y
-            angular_z = msg.angular.z
+            linear_x = msg.linear.x / 3.0
+            linear_y = msg.linear.y / 3.0
+            angular_z = msg.angular.z / 3.0
 
             # Send velocity commands to Unitree Go2 robot
+            # self.sports_client.Move(linear_x, linear_y, angular_z)
             self.obstacle_avoid_client.Move(linear_x, linear_y, angular_z)
         except Exception as e:
             self.get_logger().error(f"Error processing cmd_vel: {e}")
@@ -146,7 +165,7 @@ class CmdVelToUnitree(Node):
         base_lidar_transform = TransformStamped()
         base_lidar_transform.header.stamp = zero_stamp
         base_lidar_transform.header.frame_id = "unitree_go2/base_link"
-        base_lidar_transform.child_frame_id = "unitree_go2/lidar_frame"
+        base_lidar_transform.child_frame_id = self.lidar_frame
 
 
         # Translation

@@ -27,7 +27,7 @@ class RGBToDepthNode(Node):
         self.video_pub = self.create_publisher(Image, "/unitree_go2/front_cam/color_image", 10)
 
         # Timer to publish video frames at regular intervals
-        self.timer = self.create_timer(0.1, self.publish_video_frame)
+        self.timer = self.create_timer(0.08, self.publish_video_frame)
 
         # Parameters
         model_path = self.declare_parameter("model_path", "./depth_model.pt").value
@@ -52,8 +52,11 @@ class RGBToDepthNode(Node):
                 # Convert frame to ROS Image message and publish
                 image_data = np.frombuffer(bytes(data), dtype=np.uint8)
                 image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
-                video_msg = self.bridge.cv2_to_imgmsg(image , encoding="bgr8")
-                
+                image = cv2.resize(image, (640, 480))
+                video_msg = self.bridge.cv2_to_imgmsg(image , encoding="rgb8")
+                video_msg.header.stamp = self.get_clock().now().to_msg()
+                video_msg.header.frame_id = "unitree_go2/front_cam"
+
                 self.video_pub.publish(video_msg)
 
                 # Also process for depth estimation

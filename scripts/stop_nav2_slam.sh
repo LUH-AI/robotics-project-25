@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+set +u
 # Stop Nav2+SLAM processes started by run_nav2_slam.sh.
 #
 # This is important because running multiple Nav2 / slam_toolbox instances in
@@ -60,7 +60,14 @@ fi
 
 # Fallback: try to stop processes that reference our repo param files.
 PARAMS_FILE="$ROOT_DIR/nav2/nav2_slam_params.yaml"
-PC2LS_PARAMS="$ROOT_DIR/nav2/pointcloud_to_laserscan.yaml"
+# Change between sim and deploy
+if [[ -z "${RL_DEPLOY}" ]]; then
+  PC2LS_PARAMS="$ROOT_DIR/nav2/pointcloud_to_laserscan.yaml"
+  PARAMS_FILE="$ROOT_DIR/nav2/nav2_slam_params.yaml"
+else
+  PC2LS_PARAMS="$ROOT_DIR/nav2/pointcloud_to_laserscan_deploy.yaml"
+  PARAMS_FILE="$ROOT_DIR/nav2/nav2_slam_params_deploy.yaml"
+fi
 
 log "[go2_nav2] No PID file found. Trying best-effort cleanup by pattern..."
 for pid in $(pgrep -f "$PARAMS_FILE" 2>/dev/null || true); do

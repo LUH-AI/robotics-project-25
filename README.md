@@ -11,6 +11,8 @@ An autonomous quadruped robot agent that explores unknown environments, detects 
 ### Terminal 1: Launch Isaac Sim
 
 ```bash
+cd ~/Desktop/OPUS_MAX/ISAAC-EXP 
+
 ./scripts/run_go2.sh
 # Select detection mode:
 # 1) EASY   - 1 Cube 5m in front
@@ -19,6 +21,13 @@ An autonomous quadruped robot agent that explores unknown environments, detects 
 ```
 
 Wait for: **"Simulation App Startup Complete"**
+
+### (Alternatively for Deployment) Terminal 1: Launch Bridges
+
+```bash
+cd ~/Desktop/OPUS_MAX/ISAAC-EXP 
+./scripts/run_own_bridges.sh
+```
 
 ### Terminal 2: Launch Autonomous Agent
 

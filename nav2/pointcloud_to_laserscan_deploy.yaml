@@ -1,0 +1,30 @@
+pointcloud_to_laserscan:
+  ros__parameters:
+    use_sim_time: False
+    # Use the lidar frame so height filtering is relative to the sensor plane.
+    # pc_to_scan.py will transform from the cloud frame into this target frame.
+    target_frame: unitree_go2/lidar_frame
+    
+    transform_tolerance: 0.2
+    # Keep points near the lidar plane; drop ground/ceiling returns.
+    # Keep a tighter band around the lidar plane to drop ground/robot body returns.
+    min_height: -0.2 # NOTE: ADDED AT 20.01 tofix lidar frame handling
+    max_height: 0.3 # NOTE: was 0.75
+    angle_min: -3.14159
+    angle_max: 3.14159
+    angle_increment: 0.0087   # ~0.5 deg
+    scan_time: 0.1
+    queue_size: 100
+    range_min: 0.4
+    range_max: 10.0
+    use_inf: True
+    inf_epsilon: 1.0
+    # Shift scan timestamps slightly into the past to avoid TF lookup extrapolation errors.
+    stamp_offset: 0.02
+    # If incoming stamps are far from wall time, fall back to latest TF + wall time.
+    max_stamp_age: 2.0
+    use_latest_tf_on_failure: true
+    # Ignore roll/pitch from odom->sensor to stabilize 2D mapping on a walking robot.
+    flatten_roll_pitch: true
+    # Downsample to keep slam_toolbox + costmaps from dropping messages due to full queues.
+    max_pub_rate: 5.0

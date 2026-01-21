@@ -65,10 +65,13 @@ from go2_grounded_sam2 import GroundedSAM2Detector, draw_detections
 from go2_sam3_detector import Sam3RealtimeDetector
 
 
+bridge = CvBridge()
 def _image_to_bgr(msg: Image) -> np.ndarray:
     """Convert a ROS image to BGR numpy array."""
-    if CvBridge is not None:
+    global bridge
+    if bridge is None:
         bridge = CvBridge()
+    if bridge is not None:
         return bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
 
     # Manual conversion fallback; handles rgb8/bgr8 encodings.
@@ -92,13 +95,13 @@ class Go2GroundedSAM2Node(Node):
     def __init__(self, args: argparse.Namespace) -> None:
         super().__init__("go2_grounded_sam2")
         self.prompt_text = args.prompt_text
-        self.min_interval = 1.0 / max(args.max_hz, 0.1)
+        self.min_interval = 1.0 / 10
         self._last_inference = 0.0
-        self._queue: queue.Queue[tuple[np.ndarray, Image]] = queue.Queue(maxsize=1)
+        self._queue: queue.Queue[tuple[np.ndarray, Image]] = queue.Queue(maxsize=2)
 
         # Camera topics coming from Isaac / bridges are typically BEST_EFFORT.
         qos_in = QoSProfile(
-            depth=1,
+            depth=2,
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
         )
@@ -212,6 +215,7 @@ class Go2GroundedSAM2Node(Node):
             try:
                 bgr, msg = self._queue.get(timeout=0.1)
             except queue.Empty:
+                print("No image in queue, waiting...")
                 continue
 
             now = time.time()
@@ -440,6 +444,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     try:
         rclpy.spin(node)
     finally:
+        print("Shutting down SAM node...")
         node.destroy_node()
         rclpy.shutdown()
 
