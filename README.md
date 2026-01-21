@@ -30,9 +30,10 @@ cd ~/Desktop/OPUS_MAX/ISAAC-EXP
 ```
 
 ### Terminal 2: Launch Autonomous Agent
+RL_DEPLOY=1 indicates deployment mode with adjusted parameters for real-world scenarios.
 
 ```bash
-./scripts/start_agent.sh
+RL_DEPLOY=1 ./scripts/start_agent.sh
 
 # With logging file
 ./scripts/start_agent.sh > run.log 2>&1
