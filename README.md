@@ -43,14 +43,21 @@ uv pip install 'dimos[base,unitree]'
 
 DimOS requires Python `>=3.10` (see `dimos/pyproject.toml`).
 
-<!-- ### 3) SAM3 weights
+### 3) SAM3 weights
 
 You need a weights file on disk and an env var pointing at it:
 
 - Put it at `dimos/sam3.pt` (auto-detected), **or**
 - Export `SAM3_MODEL_PATH=/absolute/path/to/sam3.pt` (also accepts `DIMOS_SAM3_MODEL`).
 
---- -->
+If you have access to the gated Hugging Face model, you can download the weights into `dimos/sam3.pt`:
+
+```bash
+export HF_TOKEN=<your_huggingface_token> # need read permissions
+python3 download_sam3.py
+```
+
+---
 
 ## Running it on the Robot
 
