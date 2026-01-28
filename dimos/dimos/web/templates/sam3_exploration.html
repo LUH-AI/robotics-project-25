@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<!--
+ Copyright 2025-2026 Dimensional Inc.
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SAM3 Search + Exploration</title>
+    <style>
+      :root {
+        --bg: #070a13;
+        --panel: rgba(255, 255, 255, 0.06);
+        --panel-2: rgba(255, 255, 255, 0.08);
+        --stroke: rgba(255, 255, 255, 0.10);
+        --text: rgba(255, 255, 255, 0.92);
+        --muted: rgba(255, 255, 255, 0.65);
+        --muted2: rgba(255, 255, 255, 0.45);
+        --good: #22c55e;
+        --warn: #f59e0b;
+        --bad: #ef4444;
+        --accent: #7c3aed;
+        --accent2: #06b6d4;
+        --shadow: 0 12px 40px rgba(0, 0, 0, 0.50);
+        --radius: 18px;
+        --radius-sm: 12px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        color: var(--text);
+        background:
+          radial-gradient(1200px 600px at 20% 10%, rgba(124, 58, 237, 0.28), transparent 55%),
+          radial-gradient(900px 500px at 80% 20%, rgba(6, 182, 212, 0.22), transparent 55%),
+          radial-gradient(900px 700px at 55% 90%, rgba(34, 197, 94, 0.12), transparent 60%),
+          linear-gradient(180deg, #070a13 0%, #050610 100%);
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell,
+          Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        overflow: hidden;
+      }
+
+      .wrap {
+        height: 100%;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+
+      header {
+        padding: 18px 22px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .title {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .badge {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, rgba(124, 58, 237, 0.95), rgba(6, 182, 212, 0.90));
+        box-shadow: 0 10px 30px rgba(124, 58, 237, 0.28);
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+      }
+
+      .badge svg {
+        opacity: 0.95;
+      }
+
+      .title h1 {
+        font-size: 16px;
+        margin: 0;
+        letter-spacing: 0.2px;
+        line-height: 1.2;
+      }
+
+      .title .sub {
+        margin-top: 3px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .statusbar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .pill {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+        color: var(--muted);
+        font-size: 12px;
+        user-select: none;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--muted2);
+        box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
+      }
+
+      .dot.good {
+        background: var(--good);
+        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+      }
+      .dot.warn {
+        background: var(--warn);
+        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.20);
+      }
+      .dot.bad {
+        background: var(--bad);
+        box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.20);
+      }
+
+      main {
+        padding: 0 22px 22px;
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 16px;
+        min-height: 0;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--stroke);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(12px);
+        overflow: hidden;
+        min-height: 0;
+      }
+
+      .panel-header {
+        padding: 14px 16px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .panel-header .h {
+        font-size: 13px;
+        letter-spacing: 0.25px;
+        color: rgba(255, 255, 255, 0.88);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .panel-header .h small {
+        color: var(--muted2);
+        font-weight: 500;
+      }
+
+      .content {
+        padding: 16px;
+        min-height: 0;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 12px;
+        min-height: 0;
+        height: 100%;
+      }
+
+      .controls {
+        display: grid;
+        gap: 10px;
+      }
+
+      .input-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 10px;
+        align-items: center;
+      }
+
+      input[type="text"] {
+        width: 100%;
+        padding: 12px 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        outline: none;
+        background: rgba(0, 0, 0, 0.18);
+        color: rgba(255, 255, 255, 0.92);
+        font-size: 14px;
+        transition: border-color 140ms ease, box-shadow 140ms ease;
+      }
+
+      input[type="text"]::placeholder {
+        color: rgba(255, 255, 255, 0.35);
+      }
+
+      input[type="text"]:focus {
+        border-color: rgba(124, 58, 237, 0.55);
+        box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.20);
+      }
+
+      .btn-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      button {
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(255, 255, 255, 0.90);
+        padding: 10px 12px;
+        border-radius: 12px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+        user-select: none;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        background: rgba(255, 255, 255, 0.09);
+        border-color: rgba(255, 255, 255, 0.20);
+      }
+
+      button:active {
+        transform: translateY(0px);
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        transform: translateY(0px);
+      }
+
+      button:disabled:hover {
+        transform: translateY(0px);
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.14);
+      }
+
+
+      button.primary {
+        background: linear-gradient(135deg, rgba(124, 58, 237, 0.95), rgba(99, 102, 241, 0.95));
+        border-color: rgba(255, 255, 255, 0.16);
+        box-shadow: 0 12px 30px rgba(124, 58, 237, 0.22);
+      }
+
+      button.danger {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.95), rgba(245, 158, 11, 0.75));
+        border-color: rgba(255, 255, 255, 0.16);
+        box-shadow: 0 12px 30px rgba(239, 68, 68, 0.18);
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .card {
+        padding: 12px 12px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.10);
+      }
+
+      .card .k {
+        font-size: 11px;
+        color: var(--muted2);
+        margin-bottom: 6px;
+        letter-spacing: 0.25px;
+        text-transform: uppercase;
+      }
+
+      .card .v {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.92);
+        font-weight: 600;
+        letter-spacing: 0.15px;
+      }
+
+      .video-wrap {
+        position: relative;
+        border-radius: var(--radius);
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        background: rgba(0, 0, 0, 0.20);
+      }
+
+      .video-wrap img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+        background: rgba(0, 0, 0, 0.28);
+      }
+
+      .hint {
+        position: absolute;
+        left: 12px;
+        bottom: 12px;
+        right: 12px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(0, 0, 0, 0.30);
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        color: rgba(255, 255, 255, 0.82);
+        font-size: 12px;
+        backdrop-filter: blur(10px);
+      }
+
+      .logs {
+        height: 100%;
+        min-height: 0;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 10px;
+      }
+
+      .logbox {
+        min-height: 0;
+        overflow: auto;
+        border-radius: 14px;
+        background: rgba(0, 0, 0, 0.26);
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        padding: 12px 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          "Courier New", monospace;
+        font-size: 12px;
+        line-height: 1.35;
+        color: rgba(255, 255, 255, 0.88);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+      }
+
+      .logline {
+        white-space: pre-wrap;
+        word-break: break-word;
+        padding: 2px 0;
+        border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+      }
+
+      .logline:last-child {
+        border-bottom: none;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .right-col {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 16px;
+        min-height: 0;
+      }
+
+      @media (max-width: 1200px) {
+        main {
+          grid-template-columns: 1fr;
+          grid-template-rows: 1fr auto;
+          overflow: auto;
+        }
+        body {
+          overflow: auto;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="wrap">
+      <header>
+        <div class="title">
+          <div class="badge" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Z"
+                stroke="rgba(255,255,255,0.92)"
+                stroke-width="1.6"
+              />
+              <path
+                d="M12 7v5l3 2"
+                stroke="rgba(255,255,255,0.92)"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </div>
+          <div>
+            <h1>SAM3 Search + Exploration</h1>
+            <div class="sub">Promptable Concept Segmentation · Live Go2 Stream · Debug Console</div>
+          </div>
+        </div>
+
+        <div class="statusbar">
+          <div class="pill">
+            <span id="dot-conn" class="dot warn"></span>
+            <span id="conn">connecting…</span>
+          </div>
+          <div class="pill">
+            <span id="dot-cam" class="dot"></span>
+            <span id="cam">camera: —</span>
+          </div>
+          <div class="pill">
+            <span id="dot-sam" class="dot"></span>
+            <span id="sam">sam3: —</span>
+          </div>
+          <div class="pill">
+            <span id="dot-explore" class="dot"></span>
+            <span id="explore">exploration: —</span>
+          </div>
+          <div class="pill">
+            <span id="dot-nav" class="dot"></span>
+            <span id="nav">nav: —</span>
+          </div>
+          <div class="pill">
+            <span class="dot" id="dot-stream"></span>
+            <span id="streamMode">stream: mjpeg</span>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        <section class="panel">
+          <div class="panel-header">
+            <div class="h">Live Stream <small>(SAM3 boxes in-frame)</small></div>
+            <div class="pill">
+              <span class="dot" id="dot-found"></span>
+              <span id="found">target: —</span>
+            </div>
+          </div>
+          <div class="content">
+            <div class="grid">
+              <div class="controls">
+                <div class="input-row">
+                  <input
+                    id="prompt"
+                    type="text"
+                    placeholder='z.B. "red cup", "door", "person with yellow jacket"'
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <button id="clear" title="Prompt leeren">Clear</button>
+                  <button id="reset" class="primary" title="Reset: Aufstehen + Prompt leeren" disabled>
+                    Reset
+                  </button>
+                </div>
+
+                <div class="btn-row">
+                  <button class="primary" id="start">Start Exploration</button>
+                  <button class="danger" id="stop">Stop Exploration</button>
+                </div>
+
+                <div class="cards">
+                  <div class="card">
+                    <div class="k">Prompt</div>
+                    <div class="v" id="promptLabel">—</div>
+                  </div>
+                  <div class="card">
+                    <div class="k">Target Dist</div>
+                    <div class="v" id="dist">—</div>
+                  </div>
+                  <div class="card">
+                    <div class="k">Inference</div>
+                    <div class="v" id="infer">—</div>
+                  </div>
+                  <div class="card">
+                    <div class="k">Last Detection</div>
+                    <div class="v" id="lastDet">—</div>
+                  </div>
+                  <div class="card">
+                    <div class="k">Last Frame</div>
+                    <div class="v" id="lastFrame">—</div>
+                  </div>
+                  <div class="card">
+                    <div class="k">FPS</div>
+                    <div class="v" id="fps">—</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="video-wrap">
+                <img id="video" src="/stream" alt="Live stream" />
+                <div class="hint">
+                  Tip: Prompt live ändern. Sobald das Objekt gefunden wird, stoppt Exploration und der Roboter
+                  fährt so nah wie möglich heran.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="right-col">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="h">Debug Console <small>(events, errors, actions)</small></div>
+              <div class="btn-row">
+                <button id="copy">Copy</button>
+                <button id="clearLogs">Clear Logs</button>
+              </div>
+            </div>
+            <div class="content logs">
+              <div class="logbox" id="logbox"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      const logbox = $("logbox");
+      const video = $("video");
+      let lastStatus = null;
+      let lastFrameTs = null;
+      let streamMode = "mjpeg";
+      let snapshotTimer = null;
+
+      function fmtTime(ts) {
+        if (!ts) return "—";
+        const d = new Date(ts * 1000);
+        return d.toLocaleTimeString(undefined, { hour12: false });
+      }
+
+      function setDot(dotEl, state) {
+        dotEl.classList.remove("good", "warn", "bad");
+        if (state) dotEl.classList.add(state);
+      }
+
+      function appendLog(ts, msg) {
+        const el = document.createElement("div");
+        el.className = "logline";
+        el.textContent = `[${fmtTime(ts)}] ${msg}`;
+        logbox.appendChild(el);
+        logbox.scrollTop = logbox.scrollHeight;
+      }
+
+      function updateStatus(st) {
+        lastStatus = st;
+        $("promptLabel").textContent = st.prompt || "—";
+        $("dist").textContent =
+          st.target_distance_m == null ? "—" : `${st.target_distance_m.toFixed(2)} m`;
+        $("infer").textContent = st.last_inference_ms == null ? "—" : `${st.last_inference_ms.toFixed(0)} ms`;
+        $("lastDet").textContent = st.last_detection_ts ? fmtTime(st.last_detection_ts) : "—";
+        $("lastFrame").textContent = st.last_frame_ts ? fmtTime(st.last_frame_ts) : "—";
+        $("fps").textContent = st.fps == null ? "—" : `${st.fps.toFixed(1)}`;
+
+        // Camera heartbeat
+        if (st.last_frame_ts) lastFrameTs = st.last_frame_ts;
+        const now = Date.now() / 1000;
+        const age = st.last_frame_ts ? now - st.last_frame_ts : null;
+        if (age == null) {
+          $("cam").textContent = "camera: waiting…";
+          setDot($("dot-cam"), "warn");
+        } else if (age < 1.5) {
+          $("cam").textContent = "camera: live";
+          setDot($("dot-cam"), "good");
+        } else if (age < 4.0) {
+          $("cam").textContent = `camera: lag (${age.toFixed(1)}s)`;
+          setDot($("dot-cam"), "warn");
+        } else {
+          $("cam").textContent = `camera: stale (${age.toFixed(1)}s)`;
+          setDot($("dot-cam"), "bad");
+        }
+
+        // SAM status
+        if (st.sam_ready) {
+          const dev = st.sam_device ? ` (${st.sam_device})` : "";
+          $("sam").textContent = `sam3: ready${dev}`;
+          setDot($("dot-sam"), "good");
+        } else if (st.sam_init_error) {
+          $("sam").textContent = "sam3: error";
+          setDot($("dot-sam"), "bad");
+        } else {
+          $("sam").textContent = "sam3: loading…";
+          setDot($("dot-sam"), "warn");
+        }
+
+        $("explore").textContent =
+          st.exploration_active == null ? "exploration: —" : `exploration: ${st.exploration_active ? "ON" : "OFF"}`;
+        setDot($("dot-explore"), st.exploration_active ? "good" : "warn");
+
+        $("nav").textContent = st.nav_state == null ? "nav: —" : `nav: ${st.nav_state}`;
+        setDot($("dot-nav"), st.approach_active ? "warn" : "good");
+
+        if (st.target_completed) {
+          $("found").textContent = "target: reached";
+          setDot($("dot-found"), "good");
+        } else if (st.approach_active) {
+          $("found").textContent = "target: approaching";
+          setDot($("dot-found"), "warn");
+        } else {
+          $("found").textContent = "target: —";
+          setDot($("dot-found"), "");
+        }
+        const resetBtn = $("reset");
+        resetBtn.disabled = !st.target_completed;
+      }
+
+      function setStreamMode(mode) {
+        if (streamMode === mode) return;
+        streamMode = mode;
+        $("streamMode").textContent = `stream: ${mode}`;
+        setDot($("dot-stream"), mode === "mjpeg" ? "good" : "warn");
+
+        if (snapshotTimer) {
+          clearInterval(snapshotTimer);
+          snapshotTimer = null;
+        }
+
+        if (mode === "mjpeg") {
+          video.src = "/stream";
+        } else {
+          const tick = () => {
+            video.src = `/snapshot.jpg?ts=${Date.now()}`;
+          };
+          tick();
+          snapshotTimer = setInterval(tick, 120);
+        }
+      }
+
+      async function postJSON(url, body) {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body || {}),
+        });
+        return await res.json();
+      }
+
+      // Prompt (debounced, live)
+      let promptTimer = null;
+      $("prompt").addEventListener("input", (e) => {
+        const val = e.target.value;
+        if (promptTimer) clearTimeout(promptTimer);
+        promptTimer = setTimeout(async () => {
+          try {
+            await postJSON("/api/prompt", { prompt: val });
+          } catch (err) {
+            appendLog(Date.now() / 1000, `prompt update failed: ${err}`);
+          }
+        }, 180);
+      });
+
+      $("clear").addEventListener("click", async () => {
+        $("prompt").value = "";
+        await postJSON("/api/prompt", { prompt: "" });
+      });
+      $("reset").addEventListener("click", async () => {
+        $("prompt").value = "";
+        try {
+          const st = await postJSON("/api/reset", {});
+          updateStatus(st);
+          appendLog(Date.now() / 1000, "reset: stand up + prompt cleared");
+        } catch (err) {
+          appendLog(Date.now() / 1000, `reset failed: ${err}`);
+        }
+      });
+
+      $("start").addEventListener("click", async () => {
+        await postJSON("/api/exploration/start", {});
+      });
+
+      $("stop").addEventListener("click", async () => {
+        await postJSON("/api/exploration/stop", {});
+      });
+
+      $("clearLogs").addEventListener("click", () => {
+        logbox.innerHTML = "";
+      });
+
+      $("copy").addEventListener("click", async () => {
+        const text = logbox.innerText;
+        try {
+          await navigator.clipboard.writeText(text);
+          appendLog(Date.now() / 1000, "copied logs to clipboard");
+        } catch {
+          appendLog(Date.now() / 1000, "clipboard copy failed (browser permissions)");
+        }
+      });
+
+      // SSE events
+      const es = new EventSource("/api/events");
+      es.addEventListener("open", () => {
+        $("conn").textContent = "connected";
+        setDot($("dot-conn"), "good");
+      });
+      es.addEventListener("error", () => {
+        $("conn").textContent = "disconnected";
+        setDot($("dot-conn"), "bad");
+      });
+      es.addEventListener("log", (ev) => {
+        try {
+          const { ts, msg } = JSON.parse(ev.data);
+          appendLog(ts, msg);
+        } catch {}
+      });
+      es.addEventListener("status", (ev) => {
+        try {
+          updateStatus(JSON.parse(ev.data));
+        } catch {}
+      });
+
+      // Load initial status
+      (async () => {
+        try {
+          const st = await (await fetch("/api/status")).json();
+          updateStatus(st);
+        } catch {
+          // ignore
+        }
+      })();
+
+      // Stream fallback: if MJPEG fails to render but frames are arriving, switch to snapshot mode.
+      setDot($("dot-stream"), "good");
+      video.addEventListener("error", () => {
+        if (streamMode === "mjpeg") {
+          appendLog(Date.now() / 1000, "stream error → switching to snapshot mode");
+          setStreamMode("snapshot");
+        }
+      });
+
+      setTimeout(() => {
+        if (streamMode !== "mjpeg") return;
+        const hasFrames = lastFrameTs != null;
+        const hasRendered = video.naturalWidth > 0;
+        if (hasFrames && !hasRendered) {
+          appendLog(Date.now() / 1000, "mjpeg not rendering (but camera frames exist) → snapshot fallback");
+          setStreamMode("snapshot");
+        }
+      }, 4500);
+    </script>
+  </body>
+</html>
